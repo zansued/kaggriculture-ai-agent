@@ -29,12 +29,12 @@ class TestKaggricultureAgent(unittest.TestCase):
         mock_observation = {
             "player": {"coins": 1000, "inventory": {"WHEAT_SEED": 5}},
             "market": {"prices": {"WHEAT": 10}},
-            "step": Camping
+            "step": 0
         }
         mock_configuration = {"episodeSteps": 720}
 
         self.agent.update_state(mock_observation, mock_configuration)
-        self.assertEqual(self.agent.turn_count, Camping)
+        self.assertEqual(self.agent.turn_count, 0)
         self.assertEqual(self.agent.player_state["coins"], 1000)
 
     def test_wheat_loop_strategy(self):
@@ -60,6 +60,18 @@ class TestKaggricultureAgent(unittest.TestCase):
         self.assertTrue(self.agent._has_resource("WHEAT_SEED"))
         self.assertFalse(self.agent._has_resource("FERTILIZER"))
         self.assertFalse(self.agent._has_resource("NONEXISTENT"))
+
+    def test_diversification_strategy(self):
+        """Test diversification strategy buys seeds for best crop."""
+        self.agent.player_state = {
+            "inventory": {}
+        }
+        self.agent.market_state = {
+            "prices": {"WHEAT": 10, "CORN": 15, "POTATO": 5}
+        }
+        self.agent.board_state = {}
+        action = self.agent.diversification_strategy()
+        self.assertEqual(action, "BUY_SEED CORN")
 
     def test_phase_based_strategy(self):
         """Test strategy changes based on game phase."""
@@ -112,6 +124,7 @@ class TestUtils(unittest.TestCase):
     def test_normalize_state(self):
         """Test state normalization."""
         from src.utils import normalize_state
+        import numpy as np
 
         mock_state = {
             "player": {

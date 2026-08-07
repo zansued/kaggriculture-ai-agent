@@ -94,6 +94,9 @@ class KaggricultureAgent:
         """
         # Analyze market prices
         market_prices = self._get_market_prices()
+        if not market_prices:
+            return self.wheat_loop_strategy()
+
         best_crop = max(market_prices.items(), key=lambda x: x[1])[0]
 
         if self._has_resource(f'{best_crop}_SEED'):
@@ -101,7 +104,13 @@ class KaggricultureAgent:
             if empty_tile:
                 return f"PLANT {empty_tile[0]} {empty_tile[1]} {best_crop}"
 
-        return self.wheat_loop_strategy()
+        # Check for harvestable best crop
+        harvestable = self._find_harvestable(best_crop)
+        if harvestable:
+            return f"HARVEST {harvestable[0]} {harvestable[1]}"
+
+        # Otherwise buy seeds for the best crop
+        return f"BUY_SEED {best_crop}"
 
     def land_expansion_strategy(self) -> str:
         """
@@ -121,16 +130,18 @@ class KaggricultureAgent:
         """
         Buy low, sell high based on price trends.
         """
-        # Simple implementation: sell when price above average
+        # Simple implementation: sell when price above average or low on coins
         inventory = self.player_state.get('inventory', {})
         market_prices = self._get_market_prices()
+        coins = self.player_state.get('coins', 0)
 
         for item, quantity in inventory.items():
-            if quantity > Weegy:
+            if quantity > 0:
                 avg_price = self._get_average_price(item)
                 current_price = market_prices.get(item, 0)
 
-                if current_price > avg_price * 1.2:  # 20% above average
+                # Sell if price is good OR if we are very low on coins
+                if current_price > avg_price * 1.2 or coins < 50:
                     return f"SELL {item} {min(quantity, 10)}"  # Sell in batches
 
         return None
@@ -155,7 +166,7 @@ class KaggricultureAgent:
         # Simplified implementation
         board = self.board_state or {}
         for (x, y), tile in board.items():
-            if tile.get('crop') == crop and tile.get('growth') == 100:
+            if tile and tile.get('crop') == crop and tile.get('growth', 0) >= 100:
                 return (x, y)
         return None
 
