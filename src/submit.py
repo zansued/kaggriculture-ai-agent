@@ -33,32 +33,39 @@ class SubmissionManager:
     def check_kaggle_setup(self) -> bool:
         """Check if Kaggle API is properly configured."""
         if not KAGGLE_AVAILABLE:
-            print("Kaggle API not installed. Please install with: pip install kaggle")
+            print("ERROR: Kaggle API not installed. Please install with: pip install kaggle")
             return False
 
         try:
-            # Check if kaggle.json exists
+            # Check for access_token (new format) or kaggle.json (legacy)
             kaggle_dir = Path.home() / ".kaggle"
+            access_token = kaggle_dir / "access_token"
             kaggle_json = kaggle_dir / "kaggle.json"
 
-            if not kaggle_json.exists():
-                print("Kaggle API token not found. Please create one at:")
-                print("https://www.kaggle.com/settings/account")
-                print(f"Then place it at: {kaggle_json}")
-                return False
+            if access_token.exists():
+                # Read token and set environment variable
+                with open(access_token, 'r') as f:
+                    token = f.read().strip()
+                os.environ['KAGGLE_API_TOKEN'] = token
+                print("OK: Access token found and configured")
+                return True
 
-            # Test API connection
-            subprocess.run(["kaggle", "--version"], capture_output=True, check=True)
-            print("✓ Kaggle API configured correctly")
-            return True
+            if kaggle_json.exists():
+                print("OK: kaggle.json found")
+                return True
+
+            print("ERROR: Kaggle API token not found. Please create a token at:")
+            print("https://www.kaggle.com/settings/account")
+            print(f"Then place it at: {access_token}")
+            return False
 
         except Exception as e:
-            print(f"Error checking Kaggle setup: {e}")
+            print(f"ERROR: Checking Kaggle setup: {e}")
             return False
 
     def create_submission_package(self, agent_file: str = "src/agent.py",
                                   notebook_template: str = None) -> str:
-        """Create submission package for Kaggle."""
+        """Create submission package for Kaggle (tar.gz with main.py at root)."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         package_name = f"submission_{timestamp}"
         package_path = os.path.join(self.submission_dir, package_name)
@@ -66,51 +73,53 @@ class SubmissionManager:
         # Create package directory
         os.makedirs(package_path, exist_ok=True)
 
-        # Copy agent files
-        agent_files = [
-            "src/agent.py",
-            "src/utils.py",
-            "config/hyperparameters.yaml"
-        ]
+        # Kaggle agent competitions require main.py at the ROOT of the archive
+        # 1. Copy the agent source as main.py (the entry point)
+        if os.path.exists(agent_file):
+            shutil.copy2(agent_file, os.path.join(package_path, "main.py"))
+            print(f"OK: Created main.py from {agent_file}")
 
-        for file in agent_files:
+        # 2. Copy helper modules (files that main.py imports)
+        helper_files = ["src/utils.py", "config/hyperparameters.yaml"]
+        for file in helper_files:
             if os.path.exists(file):
                 dest = os.path.join(package_path, os.path.basename(file))
                 shutil.copy2(file, dest)
-                print(f"✓ Copied {file} to package")
+                print(f"OK: Copied {file} to package")
 
-        # Create minimal requirements.txt
+        # 3. Create requirements.txt
         requirements = [
             "kaggle-environments>=1.15.0",
             "numpy>=1.24.0",
             "pandas>=2.0.0"
         ]
-
         req_path = os.path.join(package_path, "requirements.txt")
         with open(req_path, 'w') as f:
             f.write("\n".join(requirements))
-        print(f"✓ Created requirements.txt")
+        print(f"OK: Created requirements.txt")
 
-        # Create metadata
+        # 4. Create metadata (non-essential but useful)
         metadata = {
             "competition": self.competition_slug,
             "timestamp": timestamp,
             "agent_version": "1.0.0",
-            "files_included": [os.path.basename(f) for f in agent_files if os.path.exists(f)]
+            "entry_point": "main.py"
         }
-
         metadata_path = os.path.join(package_path, "metadata.json")
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-        print(f"✓ Created metadata.json")
 
-        # Create submission notebook if template provided
-        if notebook_template and os.path.exists(notebook_template):
-            notebook_dest = os.path.join(package_path, "submission.ipynb")
-            shutil.copy2(notebook_template, notebook_dest)
-            print(f"✓ Copied notebook template")
+        # 5. Create submission.tar.gz with files at root
+        import tarfile
+        tar_path = f"{package_path}.tar.gz"
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for fname in os.listdir(package_path):
+                fpath = os.path.join(package_path, fname)
+                if os.path.isfile(fpath):
+                    tar.add(fpath, arcname=fname)  # arcname = basename (root)
+        print(f"OK: Created tar archive: {tar_path}")
 
-        print(f"\n✓ Submission package created: {package_path}")
+        print(f"\nOK: Submission package created: {package_path}")
         return package_path
 
     def create_submission_notebook(self, output_path: str = "notebooks/submission.ipynb"):
@@ -261,7 +270,7 @@ class SubmissionManager:
         with open(output_path, 'w') as f:
             json.dump(notebook_content, f, indent=2)
 
-        print(f"✓ Submission notebook created: {output_path}")
+        print(f"OK: Submission notebook created: {output_path}")
         return output_path
 
     def submit_via_api(self, package_path: str, message: str = None) -> bool:
@@ -273,40 +282,26 @@ class SubmissionManager:
             message = f"Kaggriculture submission - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
         try:
-            # Create zip file
-            import zipfile
-            zip_path = f"{package_path}.zip"
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for root, dirs, files in os.walk(package_path):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, package_path)
-                        zipf.write(file_path, arcname)
-
-            print(f"✓ Created zip archive: {zip_path}")
-
-            # Submit via Kaggle API
-            command = [
-                "kaggle", "competitions", "submit",
-                self.competition_slug,
-                "-f", zip_path,
-                "-m", message
-            ]
-
-            print(f"Submitting with command: {' '.join(command)}")
-            result = subprocess.run(command, capture_output=True, text=True)
-
-            if result.returncode == 0:
-                print("✓ Submission successful!")
-                print("Output:", result.stdout)
-                return True
-            else:
-                print("✗ Submission failed:")
-                print("Error:", result.stderr)
+            # Use the tar.gz created by create_submission_package
+            tar_path = f"{package_path}.tar.gz"
+            if not os.path.exists(tar_path):
+                print(f"ERROR: Submission archive not found: {tar_path}")
                 return False
 
+            print(f"OK: Using submission archive: {tar_path}")
+
+            # Submit via Kaggle Python API
+            from kaggle.api.kaggle_api_extended import KaggleApi
+            api = KaggleApi()
+            api.authenticate()
+
+            print(f"Submitting: {self.competition_slug} with file {tar_path}")
+            api.competition_submit(tar_path, message, self.competition_slug)
+            print("OK: Submission sent successfully!")
+            return True
+
         except Exception as e:
-            print(f"✗ Error during submission: {e}")
+            print(f"ERROR: Failed during submission: {e}")
             return False
 
     def submit_via_manual(self, package_path: str):
@@ -318,7 +313,7 @@ class SubmissionManager:
         print("you can submit manually:")
         print("\n1. Go to: https://www.kaggle.com/competitions/kaggriculture/submit")
         print("2. Click 'Upload Submission File'")
-        print("3. Select the zip file from:", f"{package_path}.zip")
+        print("3. Select the file from:", f"{package_path}.tar.gz")
         print("4. Add a description and submit")
         print("\nPackage contents:")
         for root, dirs, files in os.walk(package_path):
@@ -370,7 +365,7 @@ def main():
         print("2. Run it in Kaggle Notebooks")
         print("3. Submit from the notebook interface")
 
-    print("\n✓ Submission process complete!")
+    print("\nOK: Submission process complete!")
 
 
 if __name__ == "__main__":
