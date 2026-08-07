@@ -1,0 +1,18 @@
+{
+  "username": "your_kaggle_username",
+  "key": "your_kaggle_api_key_here"
+}
+
+/*
+To set up Kaggle API:
+
+1. Go to https://www.kaggle.com/settings/account
+2. Click "Create New Token" under API section
+3. Download kaggle.json file
+4. Place it at ~/.kaggle/kaggle.json (Linux/Mac) or C:\Users\<username>\.kaggle\kaggle.json (Windows)
+5. Set permissions: chmod 600 ~/.kaggle/kaggle.json
+
+Alternatively, set environment variables:
+- KAGGLE_USERNAME
+- KAGGLE_KEY
+*/
