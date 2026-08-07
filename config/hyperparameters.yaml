@@ -1,0 +1,72 @@
+# Hyperparameters for Kaggriculture Agent
+
+# MCTS (Monte Carlo Tree Search) Parameters
+mcts:
+  simulations: 1000  # Number of simulations per move
+  exploration_weight: 1.41  # C (exploration vs exploitation)
+  rollout_depth: 50  # Maximum depth for random rollouts
+  ucb1_constant: 1.41  # UCB1 exploration constant
+
+# Reinforcement Learning Parameters
+rl:
+  learning_rate: 0.001
+  discount_factor: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay:594  # Steps over which epsilon decays
+  batch_size: 64
+  replay_buffer_size: 10000
+  target_update_frequency: 1000
+
+# Neural Network Architecture
+neural_network:
+  hidden_layers: [256, 128, 64]  # Layer sizes
+  activation: "relu"
+  dropout_rate: 0.2
+  batch_normalization: true
+
+# Training Parameters
+training:
+  total_episodes: 10000
+  evaluation_frequency: 100
+  save_frequency: 500
+  log_frequency: 10
+  validation_episodes: 100
+
+# Strategy Weights
+strategy_weights:
+  wheat_loop: 0.3
+  diversification: 0.25
+  market_arbitrage: 0.2
+  land_expansion: 0.15
+  animal_farming: 0.1
+
+# Game-specific Parameters
+game:
+  early_game_threshold: 240  # Turns (10 days)
+  mid_game_threshold: 480    # Turns (20 days)
+  late_game_threshold: 720   # Turns (30 days)
+
+  # Resource thresholds
+  min_coins_for_expansion: 1000
+  wheat_price_threshold: 12
+  optimal_inventory_size: 50
+
+# Market Parameters
+market:
+  price_memory_size: 100  # Remember last N prices
+  trend_window: 10       # Window for trend calculation
+  volatility_threshold: 0.1  # Price change considered significant
+
+# Performance Optimization
+optimization:
+  parallel_simulations: 4  # CPU cores to use
+  cache_size: 10000       # State-action cache
+  pruning_threshold: 0.01  # Prune branches with probability < threshold
+
+# Logging and Monitoring
+logging:
+  log_level: "INFO"
+  tensorboard_logdir: "./logs"
+  matplotlib_backend: "agg"
+  save_replays: true
