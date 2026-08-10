@@ -211,6 +211,26 @@ class TestFarmHandsAndPriceSelection(unittest.TestCase):
         self.assertEqual(_unfertilized_yield("CARROT"), 3)
         self.assertEqual(_unfertilized_yield("MELON"), 6)
 
+    def test_premium_sell_limited_per_turn(self):
+        brain = FarmBrain(max_hands=2, seed_buffer=6, premium_sell_per_turn=2)
+        obs = _real_obs(money=3000.0, day=10)
+        obs["private"]["shed"]["MELON"] = 10
+        obs["private"]["shed"]["WHEAT"] = 10
+        action = brain.decide(obs)
+        sell_ops = {op[1]: op[2] for op in action["market"] if op[0] == "SELL"}
+        # Premium MELON is capped at premium_sell_per_turn.
+        self.assertEqual(sell_ops.get("MELON"), 2)
+        # Staple WHEAT is sold freely.
+        self.assertEqual(sell_ops.get("WHEAT"), 10)
+
+    def test_staple_sell_unlimited(self):
+        brain = FarmBrain(max_hands=2, seed_buffer=6)
+        obs = _real_obs(money=3000.0, day=10)
+        obs["private"]["shed"]["WHEAT"] = 25
+        action = brain.decide(obs)
+        sell_ops = {op[1]: op[2] for op in action["market"] if op[0] == "SELL"}
+        self.assertEqual(sell_ops.get("WHEAT"), 25)
+
 
 class TestUtils(unittest.TestCase):
     """Test utility functions."""

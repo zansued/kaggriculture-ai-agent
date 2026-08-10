@@ -105,18 +105,25 @@ def _unfertilized_yield(crop: str) -> int:
 
 
 class FarmBrain:
+    # Products whose market price crashes hard when we oversell (base > 100,
+    # with a sharp above-I0 shape). Selling too many of these per turn floods
+    # the shared market and drives the price to the $1 floor.
+    PREMIUM = {"MELON", "STRAWBERRY"}
+
     def __init__(
         self,
         crops: list[str] | None = None,
         max_hands: int = 2,
         seed_buffer: int = 6,
         buy_land_day: int | None = None,
+        premium_sell_per_turn: int = 2,
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
         self.max_hands = max_hands
         self.seed_buffer = seed_buffer  # keep at least this many seeds per crop
         self.buy_land_day = buy_land_day  # buy NE quadrant on this day if affordable
+        self.premium_sell_per_turn = premium_sell_per_turn  # cap premium units/turn
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -141,8 +148,15 @@ class FarmBrain:
         money = float(farm.get("money", 0.0))
 
         # Sell everything in the shed — cash now beats sitting inventory.
+        # Premium goods (melon/strawberry) crash the shared market if we dump
+        # too many at once, so cap how many of each we sell per turn. The shed
+        # caps at 100 units, so this is a timing lever, not a stockpile one.
         for item, amount in shed.items():
             qty = int(amount)
+            if qty <= 0:
+                continue
+            if item in self.PREMIUM:
+                qty = min(qty, self.premium_sell_per_turn)
             if qty > 0:
                 ops.append([SELL, item, qty])
 
