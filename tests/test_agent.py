@@ -231,6 +231,37 @@ class TestFarmHandsAndPriceSelection(unittest.TestCase):
         sell_ops = {op[1]: op[2] for op in action["market"] if op[0] == "SELL"}
         self.assertEqual(sell_ops.get("WHEAT"), 25)
 
+    def test_premium_production_cap_limits_planting(self):
+        # With max_premium_plants=0, melon/strawberry seeds are not bought and
+        # premium plants are not preferred for planting.
+        brain = FarmBrain(max_hands=2, seed_buffer=6, max_premium_plants=0)
+        obs = _real_obs(money=3000.0, day=5)
+        obs["farms"][0]["tiles"] = [
+            [None if (x < 5 and y < 5) else "LOCKED" for x in range(10)] for y in range(10)
+        ]
+        action = brain.decide(obs)
+        buy_ops = [op for op in action["market"] if op[0] == "BUY_SEED"]
+        # No premium seed should be bought when the cap is 0.
+        self.assertFalse(any(op[1] in {"MELON", "STRAWBERRY"} for op in buy_ops))
+
+    def test_premium_production_cap_counts_active_plants(self):
+        # When the cap is reached by active plants, planting uses a staple.
+        tiles = [[None for _ in range(10)] for _ in range(10)]
+        # 2 active melon plants.
+        tiles[0][0] = {"kind": "PLANT", "crop": "MELON", "planted_day": 0, "watered_today": True,
+                       "consecutive_unwatered": 0, "yield_units": 1, "max_lifespan_step": -1, "fertilized_until_day": -1}
+        tiles[1][0] = {"kind": "PLANT", "crop": "MELON", "planted_day": 0, "watered_today": True,
+                       "consecutive_unwatered": 0, "yield_units": 1, "max_lifespan_step": -1, "fertilized_until_day": -1}
+        brain = FarmBrain(max_hands=2, seed_buffer=6, max_premium_plants=2)
+        obs = _real_obs(tiles=tiles, money=3000.0, day=5)
+        obs["private"]["seeds"]["MELON"] = 3
+        obs["private"]["seeds"]["CARROT"] = 3
+        action = brain.decide(obs)
+        # With the cap reached and both melon+carrot seeds available, a staple
+        # should be planted (or nothing premium bought/planted).
+        if action["farmer"][0] == "PLANT":
+            self.assertNotEqual(action["farmer"][1], "MELON")
+
 
 class TestUtils(unittest.TestCase):
     """Test utility functions."""

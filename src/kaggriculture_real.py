@@ -117,6 +117,7 @@ class FarmBrain:
         seed_buffer: int = 6,
         buy_land_day: int | None = None,
         premium_sell_per_turn: int = 2,
+        max_premium_plants: int | None = None,
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -124,6 +125,9 @@ class FarmBrain:
         self.seed_buffer = seed_buffer  # keep at least this many seeds per crop
         self.buy_land_day = buy_land_day  # buy NE quadrant on this day if affordable
         self.premium_sell_per_turn = premium_sell_per_turn  # cap premium units/turn
+        # Max simultaneous premium plants on the field. Capping production
+        # avoids flooding the shared market (town drains only ~1 premium/day).
+        self.max_premium_plants = max_premium_plants
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -178,9 +182,17 @@ class FarmBrain:
                 ops.append([BUY_LAND])
                 money -= 1000
 
-        # Buy seeds for the most profitable affordable crop(s).
+        # Buy seeds for the most profitable affordable crop(s). Skip premium
+        # crops when we already have enough active plants (production cap).
         preferred = self._preferred_crops(obs, farm, day)
+        active_premium = self._count_premium_plants(farm)
         for crop in preferred:
+            if (
+                crop in self.PREMIUM
+                and self.max_premium_plants is not None
+                and active_premium >= self.max_premium_plants
+            ):
+                continue
             have = seeds.get(crop, 0)
             if have < self.seed_buffer and money >= CROPS[crop]["seed"]:
                 ops.append([BUY_SEED, crop, 1])
@@ -225,6 +237,22 @@ class FarmBrain:
                     elif kind == KIND_WEED:
                         weed.append((x, y))
 
+        active_premium = self._count_premium_plants(farm)
+
+        # Crop order for planting: preferred list, but skip premium crops once
+        # we've hit the production cap.
+        def _plantable_crop():
+            for c in preferred:
+                if seeds.get(c, 0) > 0:
+                    if (
+                        c in self.PREMIUM
+                        and self.max_premium_plants is not None
+                        and active_premium >= self.max_premium_plants
+                    ):
+                        continue
+                    return c
+            return None
+
         # Ordered task list: water(rank 0) > harvest(1) > dig(2) > plant(3).
         tasks = []
         for xy in water:
@@ -234,7 +262,7 @@ class FarmBrain:
         for xy in weed:
             tasks.append((2, xy, [DIG]))
         for xy in plant:
-            crop = next((c for c in preferred if seeds.get(c, 0) > 0), None)
+            crop = _plantable_crop()
             if crop:
                 tasks.append((3, xy, [PLANT, crop]))
 
@@ -261,7 +289,19 @@ class FarmBrain:
                 cmds.append([step_toward(pos[0], pos[1], xy[0], xy[1])])
         return cmds
 
-    # ---- 3. price-aware crop selection -------------------------------------- #
+    # ---- 3. premium production cap ------------------------------------------- #
+    def _count_premium_plants(self, farm) -> int:
+        tiles = farm.get("tiles", [])
+        return sum(
+            1
+            for y in range(len(tiles))
+            for x in range(len(tiles[y]))
+            if isinstance(tiles[y][x], dict)
+            and tiles[y][x].get("kind") == KIND_PLANT
+            and tiles[y][x].get("crop") in self.PREMIUM
+        )
+
+    # ---- 4. price-aware crop selection -------------------------------------- #
     def _preferred_crops(self, obs, farm, day) -> list[str]:
         prices = obs.get("market", {}).get("prices", {})
         scored = []
