@@ -70,8 +70,16 @@ class FarmBrain:
         private = obs.get("private", {"seeds": {}, "shed": {}})
         fx, fy = farmer_xy(obs)
         day = int(obs.get("day", 1))
-        market = self._plan_market(private)
-        target, farmer_cmd = self._plan_farmer(farm, private, day, fx, fy)
+
+        prices = obs.get("prices")
+        seed_costs = obs.get("seed_costs", {})
+        if prices:
+            preferred_crops = sorted(prices.keys(), key=lambda k: prices[k], reverse=True)
+        else:
+            preferred_crops = self.crops
+
+        market = self._plan_market(private, farm, preferred_crops, seed_costs)
+        target, farmer_cmd = self._plan_farmer(farm, private, day, fx, fy, preferred_crops)
 
         if target is None:
             return build_action([PASS], market)
@@ -81,14 +89,18 @@ class FarmBrain:
             return build_action(farmer_cmd, market)
         return build_action([step_toward(fx, fy, tx, ty)], market)
 
-    def _plan_market(self, private: dict) -> list:
+    def _plan_market(self, private: dict, farm: dict, preferred_crops: list[str], seed_costs: dict) -> list:
         ops: list = []
         seeds = private.get("seeds", {})
         shed = private.get("shed", {})
+        available_money = farm.get("money", 0.0)
 
-        for crop in self.crops:
+        for crop in preferred_crops:
             if seeds.get(crop, 0) < self.seed_restock_threshold:
-                ops.append([BUY_SEED, crop, self.seed_restock_qty])
+                cost = self.seed_restock_qty * seed_costs.get(crop, 15.0)
+                if available_money >= cost:
+                    ops.append([BUY_SEED, crop, self.seed_restock_qty])
+                    available_money -= cost
 
         for crop, amount in shed.items():
             qty = _as_int_qty(amount)
@@ -97,7 +109,7 @@ class FarmBrain:
 
         return ops
 
-    def _plan_farmer(self, farm, private, day, fx, fy):
+    def _plan_farmer(self, farm, private, day, fx, fy, preferred_crops):
         tiles = farm.get("tiles", [])
         seeds = private.get("seeds", {})
         size = len(tiles)
@@ -120,7 +132,7 @@ class FarmBrain:
                 elif kind == KIND_WEED:
                     weed.append((x, y))
 
-        have_seed = any(seeds.get(c, 0) > 0 for c in self.crops)
+        have_seed = any(seeds.get(c, 0) > 0 for c in preferred_crops)
         if harvest:
             return _nearest(fx, fy, harvest), [HARVEST]
         if water:
@@ -128,7 +140,7 @@ class FarmBrain:
         if weed:
             return _nearest(fx, fy, weed), [DIG]
         if plant and have_seed:
-            crop = next(c for c in self.crops if seeds.get(c, 0) > 0)
+            crop = next(c for c in preferred_crops if seeds.get(c, 0) > 0)
             return _nearest(fx, fy, plant), [PLANT, crop]
         return None, [PASS]
 

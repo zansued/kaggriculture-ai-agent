@@ -42,6 +42,50 @@ class TestRealProtocolAgent(unittest.TestCase):
         action = agent(obs, None)
         self.assertIn(action["farmer"][0], {"PASS", "PLANT"})
 
+    def test_agent_prefers_profitable_crop(self):
+        obs = {
+            "player": 0,
+            "day": 1,
+            "farms": [{"farmer": [0, 0], "money": 100.0, "tiles": [[None, None], [None, None]]}],
+            "private": {"seeds": {}, "shed": {}},
+            "prices": {"CORN": 26.0, "WHEAT": 15.0},
+            "seed_costs": {"CORN": 15.0, "WHEAT": 10.0}
+        }
+        action = agent(obs, None)
+
+        # It should buy CORN because it's more profitable
+        has_buy_corn = False
+        for op in action.get("market", []):
+            if op[0] == "BUY_SEED" and op[1] == "CORN":
+                has_buy_corn = True
+        self.assertTrue(has_buy_corn)
+
+        # If we already had seeds for both, it should plant CORN
+        obs["private"]["seeds"] = {"WHEAT": 10, "CORN": 10}
+        action2 = agent(obs, None)
+        self.assertEqual(action2["farmer"][0], "PLANT")
+        self.assertEqual(action2["farmer"][1], "CORN")
+
+    def test_agent_falls_back_to_default_crop_without_prices(self):
+        obs = {
+            "player": 0,
+            "day": 1,
+            "farms": [{"farmer": [0, 0], "money": 100.0, "tiles": [[None, None], [None, None]]}],
+            "private": {"seeds": {}, "shed": {}},
+        }
+        action = agent(obs, None)
+
+        has_buy_wheat = False
+        for op in action.get("market", []):
+            if op[0] == "BUY_SEED" and op[1] == "WHEAT":
+                has_buy_wheat = True
+        self.assertTrue(has_buy_wheat)
+
+        obs["private"]["seeds"] = {"WHEAT": 10, "CORN": 10}
+        action2 = agent(obs, None)
+        self.assertEqual(action2["farmer"][0], "PLANT")
+        self.assertEqual(action2["farmer"][1], "WHEAT")
+
 
 class TestUtils(unittest.TestCase):
     """Test utility functions."""
@@ -63,6 +107,7 @@ class TestUtils(unittest.TestCase):
         }
 
         normalized = normalize_state(mock_state)
+        import numpy as np
         self.assertIsInstance(normalized, np.ndarray)
         self.assertTrue(len(normalized) > 0)
 
