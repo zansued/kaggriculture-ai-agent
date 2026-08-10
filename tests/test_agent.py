@@ -1,5 +1,5 @@
 """
-Test script for Kaggriculture agent.
+Test script for Kaggriculture agent (real engine protocol).
 """
 
 import sys
@@ -12,17 +12,46 @@ from src.kaggriculture_real import (
     validate_minimal_decision,
     agent,
     FarmBrain,
-    CROP_ECONOMICS,
+    CROPS,
+    ANIMALS,
+    PRODUCTS,
+    STARTING_MONEY,
 )
 
 
-def _farm_obs(tiles, seeds=None, money=100.0):
-    """Build a minimal real-protocol observation."""
+def _real_obs(tiles=None, seeds=None, money=STARTING_MONEY, day=0):
+    """Build a minimal observation matching the REAL engine shape."""
+    board = 10
+    if tiles is None:
+        # Default: NW 5x5 unlocked, rest LOCKED, empty.
+        tiles = [
+            [None if (x < 5 and y < 5) else "LOCKED" for x in range(board)]
+            for y in range(board)
+        ]
     return {
         "player": 0,
-        "day": 1,
-        "farms": [{"farmer": [0, 0], "money": money, "tiles": tiles}],
-        "private": {"seeds": seeds or {}, "shed": {}},
+        "day": day,
+        "hour": 0,
+        "farms": [
+            {
+                "money": float(money),
+                "farmer": [4, 4],
+                "hands": [],
+                "unlocked_quadrants": ["NW"],
+                "hires_today": 0,
+                "tiles": tiles,
+            }
+        ],
+        "market": {
+            "inventory": {item: 10000 for item in PRODUCTS},
+            "prices": {item: 25 for item in PRODUCTS},
+        },
+        "town": {"unlocked_shops": []},
+        "private": {
+            "shed": {item: 0 for item in PRODUCTS + list(ANIMALS)},
+            "seeds": {"WHEAT": 0, "CARROT": 0, "TOMATO": 0, "STRAWBERRY": 0, "MELON": 0},
+            "inventories": [{}],
+        },
     }
 
 
@@ -32,81 +61,111 @@ class TestRealProtocolAgent(unittest.TestCase):
         self.assertIsInstance(action, dict)
         self.assertIn("farmer", action)
         self.assertIn("market", action)
-        # With an empty tile and seeds on hand, the agent should plant.
-        self.assertEqual(action["farmer"][0], "PLANT")
+        self.assertIn("hands", action)
 
-    def test_agent_function_accepts_minimal_obs(self):
-        obs = {
-            "player": 0,
-            "day": 1,
-            "farms": [{"farmer": [0, 0], "money": 100.0, "tiles": [[None, None], [None, None]]}],
-            "private": {"seeds": {"WHEAT": 1}, "shed": {}},
-        }
+    def test_agent_accepts_real_obs(self):
+        obs = _real_obs(seeds={"WHEAT": 1, "CARROT": 0})
+        obs["private"]["seeds"]["WHEAT"] = 1
         action = agent(obs, None)
         self.assertIsInstance(action, dict)
         self.assertIn("farmer", action)
         self.assertIn("market", action)
         self.assertTrue(len(action["farmer"]) >= 1)
 
-    def test_agent_prioritizes_planting_when_seed_available(self):
-        obs = {
-            "player": 0,
-            "day": 1,
-            "farms": [{"farmer": [0, 0], "money": 100.0, "tiles": [[None, None], [None, None]]}],
-            "private": {"seeds": {"WHEAT": 1}, "shed": {}},
-        }
+    def test_plants_wheat_when_seed_and_empty_tile(self):
+        obs = _real_obs()
+        obs["private"]["seeds"]["WHEAT"] = 1
         action = agent(obs, None)
-        self.assertIn(action["farmer"][0], {"PASS", "PLANT"})
-
-
-class TestPriceAwareCropSelection(unittest.TestCase):
-    """Crop selection by profitability (static economics + live-price override)."""
-
-    def test_prefers_more_profitable_crop_by_default(self):
-        # Without live prices, CORN has a higher net profit than WHEAT.
-        brain = FarmBrain(crops=["WHEAT", "CORN"])
-        self.assertGreater(
-            brain._net_profit("CORN", None),
-            brain._net_profit("WHEAT", None),
-        )
-        obs = _farm_obs([[None]], seeds={"WHEAT": 1, "CORN": 1})
-        self.assertEqual(brain._preferred_crops(obs)[0], "CORN")
-
-    def test_market_price_override_inverts_preference(self):
-        # Live prices make WHEAT far more profitable than CORN.
-        brain = FarmBrain(crops=["WHEAT", "CORN"])
-        prices = {"WHEAT": 100.0, "CORN": 5.0}
-        obs = _farm_obs([[None]], seeds={"WHEAT": 1, "CORN": 1})
-        obs["market"] = {"prices": prices}
-        self.assertEqual(brain._preferred_crops(obs)[0], "WHEAT")
-        action = brain.decide(obs)
         self.assertEqual(action["farmer"][0], "PLANT")
         self.assertEqual(action["farmer"][1], "WHEAT")
 
-    def test_buys_seeds_for_most_profitable_crop(self):
-        brain = FarmBrain(crops=["WHEAT", "CORN"], seed_restock_qty=4)
-        obs = _farm_obs([[None, None]], seeds={"WHEAT": 1}, money=100.0)
-        action = brain.decide(obs)
-        market_ops = action["market"]
-        buy_ops = [op for op in market_ops if op[0] == "BUY_SEED"]
-        self.assertTrue(any(op[1] == "CORN" for op in buy_ops))
+    def test_does_not_harvest_immature_one_time_crop(self):
+        # A wheat plant aged < max_yield_day (4) must be watered, not harvested.
+        tiles = [[None for _ in range(10)] for _ in range(10)]
+        tiles[4][4] = {
+            "kind": "PLANT",
+            "crop": "WHEAT",
+            "planted_day": 0,
+            "watered_today": False,
+            "consecutive_unwatered": 0,
+            "yield_units": 1,
+            "max_lifespan_step": -1,
+            "fertilized_until_day": -1,
+        }
+        obs = _real_obs(tiles=tiles, day=2)
+        action = agent(obs, None)
+        self.assertEqual(action["farmer"][0], "WATER")
+
+    def test_harvests_mature_one_time_crop(self):
+        # A wheat plant aged >= max_yield_day (4) with yield should be harvested.
+        tiles = [[None for _ in range(10)] for _ in range(10)]
+        tiles[4][4] = {
+            "kind": "PLANT",
+            "crop": "WHEAT",
+            "planted_day": 0,
+            "watered_today": True,
+            "consecutive_unwatered": 0,
+            "yield_units": 4,
+            "max_lifespan_step": -1,
+            "fertilized_until_day": -1,
+        }
+        obs = _real_obs(tiles=tiles, day=4)
+        action = agent(obs, None)
+        self.assertEqual(action["farmer"][0], "HARVEST")
+
+    def test_harvests_ongoing_crop_with_yield(self):
+        # An ongoing tomato with yield_units > 0 should be harvested.
+        tiles = [[None for _ in range(10)] for _ in range(10)]
+        tiles[4][4] = {
+            "kind": "PLANT",
+            "crop": "TOMATO",
+            "planted_day": 0,
+            "watered_today": True,
+            "consecutive_unwatered": 0,
+            "yield_units": 2,
+            "max_lifespan_step": -1,
+            "fertilized_until_day": -1,
+        }
+        obs = _real_obs(tiles=tiles, day=9)
+        action = agent(obs, None)
+        self.assertEqual(action["farmer"][0], "HARVEST")
+
+    def test_digs_weed(self):
+        tiles = [[None for _ in range(10)] for _ in range(10)]
+        tiles[4][4] = {"kind": "WEED"}
+        obs = _real_obs(tiles=tiles)
+        action = agent(obs, None)
+        self.assertEqual(action["farmer"][0], "DIG")
+
+    def test_sells_shed_inventory(self):
+        obs = _real_obs()
+        obs["private"]["shed"]["WHEAT"] = 5
+        action = agent(obs, None)
+        sell_ops = [op for op in action["market"] if op[0] == "SELL"]
+        self.assertTrue(any(op[1] == "WHEAT" for op in sell_ops))
+
+    def test_buys_seed_when_low_and_affordable(self):
+        obs = _real_obs(seeds={"WHEAT": 0, "CARROT": 0})
+        action = agent(obs, None)
+        buy_ops = [op for op in action["market"] if op[0] == "BUY_SEED"]
+        self.assertTrue(any(op[1] == "WHEAT" for op in buy_ops))
 
     def test_respects_money_when_buying_seeds(self):
-        brain = FarmBrain(crops=["WHEAT", "CORN"], seed_restock_qty=4)
-        # Only enough money for a single seed batch.
-        obs = _farm_obs([[None]], seeds={}, money=12.0)
-        action = brain.decide(obs)
+        obs = _real_obs(seeds={"WHEAT": 0, "CARROT": 0}, money=5.0)
+        action = agent(obs, None)
         buy_ops = [op for op in action["market"] if op[0] == "BUY_SEED"]
-        # Should not emit a BUY_SEED it cannot afford (CORN seed costs 15).
-        self.assertFalse(any(op[1] == "CORN" for op in buy_ops))
+        # WHEAT seed costs 10 > 5, so nothing should be bought.
+        self.assertEqual(buy_ops, [])
 
-    def test_plants_preferred_crop_available_in_inventory(self):
-        brain = FarmBrain(crops=["WHEAT", "CORN"])
-        # Only CORN seeds on hand -> plant CORN even though WHEAT is the fallback.
-        obs = _farm_obs([[None]], seeds={"WHEAT": 0, "CORN": 2})
+    def test_plants_preferred_crop_in_inventory(self):
+        # CARROT is in crops list; if only CARROT seeds available, plant CARROT.
+        brain = FarmBrain(crops=["WHEAT", "CARROT"])
+        obs = _real_obs()
+        obs["private"]["seeds"]["WHEAT"] = 0
+        obs["private"]["seeds"]["CARROT"] = 2
         action = brain.decide(obs)
         self.assertEqual(action["farmer"][0], "PLANT")
-        self.assertEqual(action["farmer"][1], "CORN")
+        self.assertEqual(action["farmer"][1], "CARROT")
 
 
 class TestUtils(unittest.TestCase):
