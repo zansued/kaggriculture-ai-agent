@@ -244,6 +244,21 @@ class TestFarmHandsAndPriceSelection(unittest.TestCase):
         # No premium seed should be bought when the cap is 0.
         self.assertFalse(any(op[1] in {"MELON", "STRAWBERRY"} for op in buy_ops))
 
+    def test_animal_disabled_by_default(self):
+        brain = FarmBrain()
+        self.assertIsNone(brain.animal)
+        self.assertIsNone(brain.max_premium_plants)
+        self.assertEqual(brain.premium_sell_per_turn, 2)
+
+    def test_animal_task_generation_requires_config(self):
+        brain = FarmBrain()
+        obs = _real_obs(money=3000.0, day=5)
+        obs["farms"][0]["tiles"] = [
+            [None if (x < 5 and y < 5) else "LOCKED" for x in range(10)] for y in range(10)
+        ]
+        tasks = brain._plan_animal_tasks(obs, obs["farms"][0], obs["private"], 5, 10)
+        self.assertEqual(tasks, [])
+
     def test_premium_production_cap_counts_active_plants(self):
         # When the cap is reached by active plants, planting uses a staple.
         tiles = [[None for _ in range(10)] for _ in range(10)]

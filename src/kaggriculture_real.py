@@ -45,8 +45,13 @@ MAX_MARKET_ORDERS = 10
 PASS = "PASS"; NORTH = "NORTH"; SOUTH = "SOUTH"; EAST = "EAST"; WEST = "WEST"
 MOVES = (NORTH, SOUTH, EAST, WEST)
 WATER = "WATER"; HARVEST = "HARVEST"; DIG = "DIG"; PLANT = "PLANT"
+BUILD_COOP = "BUILD_COOP"; BUILD_PASTURE = "BUILD_PASTURE"
+FEED = "FEED"; CARE = "CARE"; COLLECT_FERTILIZER = "COLLECT_FERTILIZER"
+PICKUP = "PICKUP"; PLACE = "PLACE"; FERTILIZE = "FERTILIZE"
 KIND_PLANT = "PLANT"; KIND_WEED = "WEED"
-BUY_SEED = "BUY_SEED"; SELL = "SELL"; HIRE = "HIRE"; BUY_LAND = "BUY_LAND"
+KIND_COOP = "COOP"; KIND_PASTURE = "PASTURE"
+BUY_SEED = "BUY_SEED"; BUY_ANIMAL = "BUY_ANIMAL"; BUY_PRODUCT = "BUY_PRODUCT"
+SELL = "SELL"; HIRE = "HIRE"; BUY_LAND = "BUY_LAND"
 
 
 def build_action(farmer_cmd: list, hands_cmds: list | None = None, market: list | None = None) -> dict:
@@ -86,6 +91,15 @@ def _manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+SHED_TILES = [(4, 4), (5, 4), (4, 5), (5, 5)]
+
+
+def _shed_tile(farm) -> tuple[int, int]:
+    """Nearest shed-access tile to the farmer (shed-adjacent positions)."""
+    fx, fy = farm.get("farmer", [4, 4])
+    return min(SHED_TILES, key=lambda t: _manhattan((fx, fy), t))
+
+
 def _fib(n: int) -> int:
     """Engine HIRE cost: fib starts 1,1,2,3,5... _fib(0)=1, _fib(1)=1, _fib(2)=2."""
     a, b = 1, 1
@@ -118,6 +132,8 @@ class FarmBrain:
         buy_land_day: int | None = None,
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
+        animal: str | None = None,  # experimental; off by default (logistics > value)
+        animal_day: int = 1,
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -128,6 +144,10 @@ class FarmBrain:
         # Max simultaneous premium plants on the field. Capping production
         # avoids flooding the shared market (town drains only ~1 premium/day).
         self.max_premium_plants = max_premium_plants
+        # Optional livestock: one animal type ("GOOSE"/"COW"/"SHEEP") bought on
+        # `animal_day`, fed wheat daily, harvested for product + free fertilizer.
+        self.animal = animal
+        self.animal_day = animal_day
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -200,6 +220,22 @@ class FarmBrain:
                 if len(ops) >= MAX_MARKET_ORDERS:
                     break
 
+        # Optional livestock: buy the animal on `animal_day`; keep a wheat stock
+        # for daily feed (animals escape after 2 unfed days). Buy wheat only
+        # after the animal is placed (we know we have it once shed has it).
+        if self.animal is not None:
+            a = ANIMALS[self.animal]
+            if day >= self.animal_day and shed.get(self.animal, 0) == 0 and not self._animal_placed(farm):
+                if money >= a["cost"]:
+                    ops.append([BUY_ANIMAL, self.animal, 1])
+                    money -= a["cost"]
+            # Feed wheat reserve: keep ~2 wheat in the shed for daily feed.
+            have_wheat = shed.get("WHEAT", 0)
+            if day >= self.animal_day and self._animal_placed(farm) and have_wheat < 3:
+                if money >= 25:  # wheat market price ~25
+                    ops.append([BUY_PRODUCT, "WHEAT", 3 - have_wheat])
+                    money -= 25 * (3 - have_wheat)
+
         return ops[:MAX_MARKET_ORDERS]
 
     # ---- 2. unit coordination ---------------------------------------------- #
@@ -253,8 +289,14 @@ class FarmBrain:
                     return c
             return None
 
-        # Ordered task list: water(rank 0) > harvest(1) > dig(2) > plant(3).
-        tasks = []
+        # ---- livestock tasks ------------------------------------------------ #
+        # Priority is higher than planting so we don't let animals escape.
+        animal_tasks = self._plan_animal_tasks(obs, farm, private, day, size)
+
+        # Ordered task list: water(0) > harvest(1) > dig(2) > plant(3), with
+        # livestock tasks (feed/harvest/build/place) at rank 0.5-ish inserted
+        # before crop work where they compete.
+        tasks = list(animal_tasks)
         for xy in water:
             tasks.append((0, xy, [WATER]))
         for xy in harvest:
@@ -289,7 +331,87 @@ class FarmBrain:
                 cmds.append([step_toward(pos[0], pos[1], xy[0], xy[1])])
         return cmds
 
-    # ---- 3. premium production cap ------------------------------------------- #
+    # ---- 3. livestock -------------------------------------------------------- #
+    def _animal_placed(self, farm) -> bool:
+        if self.animal is None:
+            return False
+        tiles = farm.get("tiles", [])
+        for y in range(len(tiles)):
+            for x in range(len(tiles[y])):
+                t = tiles[y][x]
+                if isinstance(t, dict) and t.get("animal") == self.animal:
+                    return True
+        return False
+
+    def _find_empty_structure(self, farm, structure_kind) -> tuple[int, int] | None:
+        tiles = farm.get("tiles", [])
+        for y in range(len(tiles)):
+            for x in range(len(tiles[y])):
+                t = tiles[y][x]
+                if isinstance(t, dict) and t.get("kind") == structure_kind and "animal" not in t:
+                    return (x, y)
+        return None
+
+    def _find_animal_tile(self, farm) -> tuple[int, int] | None:
+        if self.animal is None:
+            return None
+        tiles = farm.get("tiles", [])
+        for y in range(len(tiles)):
+            for x in range(len(tiles[y])):
+                t = tiles[y][x]
+                if isinstance(t, dict) and t.get("animal") == self.animal:
+                    return (x, y)
+        return None
+
+    def _plan_animal_tasks(self, obs, farm, private, day, size):
+        """Livestock chores, ranked just above watering so animals never escape."""
+        if self.animal is None:
+            return []
+        a = ANIMALS[self.animal]
+        shed = private.get("shed", {})
+        tasks = []
+        animal_tile = self._find_animal_tile(farm)
+
+        if animal_tile is None:
+            # Animal not placed yet. Build the structure on an empty tile, or
+            # place the animal if a structure already exists.
+            structure_kind = a["structure"]
+            empty_struct = self._find_empty_structure(farm, structure_kind)
+            if empty_struct is not None:
+                # The animal must be in a unit's inventory to be PLACEd. If it's
+                # still in the shed, PICK it up first — but PICKUP only works
+                # from a shed-adjacent tile (farmer spawns at (4,4), adjacent).
+                # Emit PICKUP on the nearest shed-access tile; the next turn the
+                # inventory carries it and we PLACE on the structure.
+                if shed.get(self.animal, 0) > 0:
+                    # Stand on a shed-adjacent tile to pick it up.
+                    tasks.append((-1, _shed_tile(farm), [PICKUP, self.animal, 1]))
+                else:
+                    # Assume it's already in some inventory; place it.
+                    tasks.append((-1, empty_struct, [PLACE, self.animal, 1]))
+            else:
+                # Find an empty tile to build on.
+                tiles = farm.get("tiles", [])
+                for y in range(size):
+                    for x in range(size):
+                        if tiles[y][x] is None:
+                            build = BUILD_COOP if structure_kind == KIND_COOP else BUILD_PASTURE
+                            tasks.append((-1, (x, y), [build]))
+                            return tasks
+            return tasks
+
+        # Animal placed: feed, collect fertilizer, harvest product.
+        x, y = animal_tile
+        tile = farm["tiles"][y][x]
+        if not tile.get("fed_today", False):
+            tasks.append((-1, (x, y), [FEED]))
+        if tile.get("fertilizer_available", False):
+            tasks.append((-1, (x, y), [COLLECT_FERTILIZER]))
+        if tile.get("yield_units", 0) > 0:
+            tasks.append((-1, (x, y), [HARVEST]))
+        return tasks
+
+    # ---- 4. premium production cap ------------------------------------------- #
     def _count_premium_plants(self, farm) -> int:
         tiles = farm.get("tiles", [])
         return sum(
@@ -301,7 +423,7 @@ class FarmBrain:
             and tiles[y][x].get("crop") in self.PREMIUM
         )
 
-    # ---- 4. price-aware crop selection -------------------------------------- #
+    # ---- 5. price-aware crop selection -------------------------------------- #
     def _preferred_crops(self, obs, farm, day) -> list[str]:
         prices = obs.get("market", {}).get("prices", {})
         scored = []
