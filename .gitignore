@@ -50,6 +50,10 @@ logs/
 .kaggle/
 kaggle.json
 
+# Generated artifacts (local runs)
+submissions/
+training_results/
+
 # Notebooks
 *.ipynb_checkpoints/
 

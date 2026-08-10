@@ -130,7 +130,9 @@ def get_available_actions(state: Dict[str, Any]) -> List[str]:
     if inventory.get('WHEAT_SEED', 0) > 0:
         actions.append("PLANT 0 0 WHEAT")  # Example position
     if inventory.get('CORN_SEED', 0) > 0:
-        actions.append("PLANT 0 .
+        actions.append("PLANT 0 0 CORN")
+    if inventory.get('POTATO_SEED', 0) > 0:
+        actions.append("PLANT 0 0 POTATO")
 
     return actions
 

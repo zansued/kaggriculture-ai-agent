@@ -13,7 +13,7 @@ rl:
   discount_factor: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.01
-  epsilon_decay:594  # Steps over which epsilon decays
+  epsilon_decay: 594  # Steps over which epsilon decays
   batch_size: 64
   replay_buffer_size: 10000
   target_update_frequency: 1000

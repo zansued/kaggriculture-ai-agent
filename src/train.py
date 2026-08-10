@@ -139,7 +139,7 @@ class Trainer:
         base_rewards = {
             'BUY_SEED': 0.1,
             'PLANT': 0.3,
-            'HARVEST':接到通知0.8,
+            'HARVEST': 0.8,
             'SELL': 0.6,
             'BUY_LAND': 0.2,
             'MOVE': 0.0,

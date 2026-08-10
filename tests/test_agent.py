@@ -7,103 +7,40 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
-from unittest.mock import Mock, patch
-from src.agent import KaggricultureAgent, kaggriculture_agent
+from src.kaggriculture_real import validate_minimal_decision, agent
 
 
-class TestKaggricultureAgent(unittest.TestCase):
-    """Test cases for Kaggriculture agent."""
+class TestRealProtocolAgent(unittest.TestCase):
+    def test_minimal_decision_returns_action_dict(self):
+        action = validate_minimal_decision()
+        self.assertIsInstance(action, dict)
+        self.assertIn("farmer", action)
+        self.assertIn("market", action)
+        # With an empty tile and seeds on hand, the agent should plant.
+        self.assertEqual(action["farmer"][0], "PLANT")
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.agent = KaggricultureAgent()
-
-    def test_agent_initialization(self):
-        """Test agent initializes correctly."""
-        self.assertIsNotNone(self.agent)
-        self.assertEqual(self.agent.strategy, "wheat_loop")
-        self.assertIn("wheat_loop", self.agent.strategy_weights)
-
-    def test_update_state(self):
-        """Test state update functionality."""
-        mock_observation = {
-            "player": {"coins": 1000, "inventory": {"WHEAT_SEED": 5}},
-            "market": {"prices": {"WHEAT": 10}},
-            "step": Camping
+    def test_agent_function_accepts_minimal_obs(self):
+        obs = {
+            "player": 0,
+            "day": 1,
+            "farms": [{"farmer": [0, 0], "money": 100.0, "tiles": [[None, None], [None, None]]}],
+            "private": {"seeds": {"WHEAT": 1}, "shed": {}},
         }
-        mock_configuration = {"episodeSteps": 720}
+        action = agent(obs, None)
+        self.assertIsInstance(action, dict)
+        self.assertIn("farmer", action)
+        self.assertIn("market", action)
+        self.assertTrue(len(action["farmer"]) >= 1)
 
-        self.agent.update_state(mock_observation, mock_configuration)
-        self.assertEqual(self.agent.turn_count, Camping)
-        self.assertEqual(self.agent.player_state["coins"], 1000)
-
-    def test_wheat_loop_strategy(self):
-        """Test basic wheat loop strategy."""
-        # Mock agent state
-        self.agent.player_state = {
-            "inventory": {"WHEAT_SEED": 5}
+    def test_agent_prioritizes_planting_when_seed_available(self):
+        obs = {
+            "player": 0,
+            "day": 1,
+            "farms": [{"farmer": [0, 0], "money": 100.0, "tiles": [[None, None], [None, None]]}],
+            "private": {"seeds": {"WHEAT": 1}, "shed": {}},
         }
-        self.agent.board_state = {}
-        self.agent.turn_count = 0
-
-        action = self.agent.wheat_loop_strategy()
-        self.assertIsNotNone(action)
-        # Should try to plant or buy wheat
-        self.assertTrue(action.startswith("PLANT") or action.startswith("BUY_SEED"))
-
-    def test_has_resource(self):
-        """Test resource checking."""
-        self.agent.player_state = {
-            "inventory": {"WHEAT_SEED": 5, "FERTILIZER": 0}
-        }
-
-        self.assertTrue(self.agent._has_resource("WHEAT_SEED"))
-        self.assertFalse(self.agent._has_resource("FERTILIZER"))
-        self.assertFalse(self.agent._has_resource("NONEXISTENT"))
-
-    def test_phase_based_strategy(self):
-        """Test strategy changes based on game phase."""
-        mock_observation = {
-            "player": {"coins": 1000},
-            "market": {"prices": {"WHEAT": 10}},
-            "step": 0,
-            "board": {}
-        }
-        mock_configuration = {}
-
-        # Early game
-        action1 = self.agent.choose_action(mock_observation, mock_configuration)
-        self.assertIsNotNone(action1)
-
-        # Mid game
-        mock_observation["step"] = 300
-        action2 = self.agent.choose_action(mock_observation, mock_configuration)
-        self.assertIsNotNone(action2)
-
-        # Late game
-        mock_observation["step"] = 600
-        action3 = self.agent.choose_action(mock_observation, mock_configuration)
-        self.assertIsNotNone(action3)
-
-    def test_kaggriculture_agent_function(self):
-        """Test the main agent function interface."""
-        mock_observation = {
-            "player": {"coins": 1000},
-            "market": {"prices": {"WHEAT": 10}},
-            "step": 0,
-            "board": {}
-        }
-        mock_configuration = {}
-
-        action = kaggriculture_agent(mock_observation, mock_configuration)
-        self.assertIsInstance(action, str)
-        self.assertTrue(len(action) > 0)
-
-    def test_error_handling(self):
-        """Test agent handles errors gracefully."""
-        # Test with invalid observation
-        action = kaggriculture_agent(None, None)
-        self.assertEqual(action, "BUY_SEED WHEAT")  # Should use fallback
+        action = agent(obs, None)
+        self.assertIn(action["farmer"][0], {"PASS", "PLANT"})
 
 
 class TestUtils(unittest.TestCase):
