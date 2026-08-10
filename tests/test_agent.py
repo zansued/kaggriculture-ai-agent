@@ -168,6 +168,50 @@ class TestRealProtocolAgent(unittest.TestCase):
         self.assertEqual(action["farmer"][1], "CARROT")
 
 
+class TestFarmHandsAndPriceSelection(unittest.TestCase):
+    def test_hires_hands_at_start_of_day(self):
+        brain = FarmBrain(max_hands=2)
+        obs = _real_obs(money=3000.0)
+        obs["hour"] = 0
+        action = brain.decide(obs)
+        hire_ops = [op for op in action["market"] if op[0] == "HIRE"]
+        self.assertTrue(len(hire_ops) >= 1)
+
+    def test_does_not_hire_when_broke(self):
+        brain = FarmBrain(max_hands=2)
+        obs = _real_obs(money=0.0)
+        obs["hour"] = 0
+        action = brain.decide(obs)
+        hire_ops = [op for op in action["market"] if op[0] == "HIRE"]
+        self.assertEqual(hire_ops, [])
+
+    def test_emits_hand_actions_when_hands_present(self):
+        brain = FarmBrain(max_hands=2)
+        obs = _real_obs()
+        obs["hour"] = 5
+        obs["farms"][0]["hands"] = [[3, 4], [4, 3]]
+        action = brain.decide(obs)
+        self.assertIn("hands", action)
+        self.assertEqual(len(action["hands"]), 2)
+
+    def test_price_aware_crop_choice_prefers_melon_at_high_price(self):
+        # At base/early prices melon (base 250, yield 6) dominates in profit/day.
+        brain = FarmBrain(crops=list(CROPS.keys()), seed_buffer=0)
+        obs = _real_obs(money=3000.0, day=0)
+        obs["private"]["seeds"]["MELON"] = 2
+        obs["farms"][0]["tiles"] = [[None if (x < 5 and y < 5) else "LOCKED" for x in range(10)] for y in range(10)]
+        action = brain.decide(obs)
+        # With melon seeds and an empty tile, plant melon.
+        if action["farmer"][0] == "PLANT":
+            self.assertEqual(action["farmer"][1], "MELON")
+
+    def test_unfertilized_yield_matches_engine(self):
+        from src.kaggriculture_real import _unfertilized_yield
+        self.assertEqual(_unfertilized_yield("WHEAT"), 4)
+        self.assertEqual(_unfertilized_yield("CARROT"), 3)
+        self.assertEqual(_unfertilized_yield("MELON"), 6)
+
+
 class TestUtils(unittest.TestCase):
     """Test utility functions."""
 

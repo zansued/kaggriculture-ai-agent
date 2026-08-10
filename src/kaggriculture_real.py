@@ -4,13 +4,15 @@ The engine ships inside `kaggle_environments` (envs/kaggriculture/). This module
 is SELF-CONTAINED (stdlib only) so it can be submitted as a single `main.py`:
 it inlines every protocol constant needed at decision time.
 
-Strategy (simple, correct first):
-  1. Market first: restock seeds for the crops we grow; sell everything in the
-     shed (harvested produce / animal products). Both are free market orders.
-  2. Pick the highest-priority tile for the farmer:
-        harvest (yield_units > 0)  >  water (needs water)  >  dig weed  >  plant
-     Among equal priority, choose the tile NEAREST the farmer (Manhattan).
-  3. If standing on the target, act; else step toward it. Else PASS.
+Strategy:
+  1. Market: sell everything in the shed; buy seeds for the most profitable
+     crop we can afford (price-aware via obs.market.prices); HIRE farm hands
+     at the start of each day (cheap: fib 1,1,2,3,5...).
+  2. Coordinate the farmer + hired hands on the highest-priority tasks:
+        water (plants die after 2 unwatered days)  >  harvest  >  dig weed  >  plant
+     Each unit takes the nearest unassigned task so work is spread.
+  3. Harvest one-time crops only at max_yield_day (watering through the bonus
+     window maximizes yield); harvest ongoing crops as soon as yield appears.
 """
 
 from __future__ import annotations
@@ -34,21 +36,25 @@ PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "
 
 STARTING_MONEY = 3000
 BOARD_SIZE = 10
+TURNS_PER_DAY = 24
+SEASON_DAYS = 30
+SHED_CAPACITY = 100
+MAX_MARKET_ORDERS = 10
 
 # Actions
 PASS = "PASS"; NORTH = "NORTH"; SOUTH = "SOUTH"; EAST = "EAST"; WEST = "WEST"
 MOVES = (NORTH, SOUTH, EAST, WEST)
 WATER = "WATER"; HARVEST = "HARVEST"; DIG = "DIG"; PLANT = "PLANT"
 KIND_PLANT = "PLANT"; KIND_WEED = "WEED"
-BUY_SEED = "BUY_SEED"; SELL = "SELL"
+BUY_SEED = "BUY_SEED"; SELL = "SELL"; HIRE = "HIRE"; BUY_LAND = "BUY_LAND"
 
 
-def build_action(farmer_cmd: list, market: list | None = None) -> dict:
-    return {"farmer": list(farmer_cmd), "hands": [], "market": market or []}
+def build_action(farmer_cmd: list, hands_cmds: list | None = None, market: list | None = None) -> dict:
+    return {"farmer": list(farmer_cmd), "hands": [list(c) for c in (hands_cmds or [])], "market": market or []}
 
 
 def pass_action(market: list | None = None) -> dict:
-    return build_action([PASS], market)
+    return build_action([PASS], [], market)
 
 
 def step_toward(fx: int, fy: int, tx: int, ty: int) -> str:
@@ -76,83 +82,128 @@ def _nearest(fx: int, fy: int, cells: list[tuple[int, int]]) -> tuple[int, int]:
     return min(cells, key=lambda c: abs(c[0] - fx) + abs(c[1] - fy))
 
 
+def _manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def _fib(n: int) -> int:
+    """Engine HIRE cost: fib starts 1,1,2,3,5... _fib(0)=1, _fib(1)=1, _fib(2)=2."""
+    a, b = 1, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
+def _unfertilized_yield(crop: str) -> int:
+    """Max harvestable units for a one-time crop watered daily through its bonus window."""
+    cd = CROPS[crop]
+    if cd["ongoing"]:
+        return cd["max_yield"]  # total scheduled productions
+    window_start = (cd["max_yield_day"] + 1) // 2
+    bonus_days = cd["max_yield_day"] - window_start + 1
+    return min(cd["max_yield"], 1 + bonus_days)
+
+
 class FarmBrain:
     def __init__(
         self,
         crops: list[str] | None = None,
-        seed_restock_threshold: int = 1,
-        seed_restock_qty: int = 1,
+        max_hands: int = 2,
+        seed_buffer: int = 6,
+        buy_land_day: int | None = None,
     ) -> None:
-        self.crops = crops or ["WHEAT", "CARROT"]
-        self.seed_restock_threshold = seed_restock_threshold
-        self.seed_restock_qty = seed_restock_qty
+        # Candidate crops (price-aware selection picks the best among these).
+        self.crops = crops or list(CROPS.keys())
+        self.max_hands = max_hands
+        self.seed_buffer = seed_buffer  # keep at least this many seeds per crop
+        self.buy_land_day = buy_land_day  # buy NE quadrant on this day if affordable
 
+    # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
         farm = my_farm(obs)
         private = obs.get("private", {})
-        fx, fy = farmer_xy(obs)
         day = int(obs.get("day", 0))
-        market = self._plan_market(obs, farm, private)
-        target, farmer_cmd = self._plan_farmer(obs, farm, private, day, fx, fy)
+        hour = int(obs.get("hour", 0))
+        positions = [tuple(farm["farmer"])] + [tuple(h) for h in farm.get("hands", [])]
 
-        if target is None:
-            return build_action([PASS], market)
-        tx, ty = target
-        if (fx, fy) == (tx, ty):
-            return build_action(farmer_cmd, market)
-        return build_action([step_toward(fx, fy, tx, ty)], market)
+        market = self._plan_market(obs, farm, private, day, hour)
+        cmds = self._plan_units(obs, farm, private, day, positions)
 
-    def _plan_market(self, obs: dict, farm: dict, private: dict) -> list:
+        farmer_cmd = cmds[0] if cmds else [PASS]
+        hands_cmds = cmds[1:] if len(cmds) > 1 else []
+        return build_action(farmer_cmd, hands_cmds, market)
+
+    # ---- 1. market --------------------------------------------------------- #
+    def _plan_market(self, obs: dict, farm: dict, private: dict, day: int, hour: int) -> list:
         ops: list = []
         seeds = private.get("seeds", {})
         shed = private.get("shed", {})
         money = float(farm.get("money", 0.0))
 
-        for crop in self.crops:
-            have = seeds.get(crop, 0)
-            if have < self.seed_restock_threshold:
-                cost = CROPS[crop]["seed"] * self.seed_restock_qty
-                if money >= cost:
-                    ops.append([BUY_SEED, crop, self.seed_restock_qty])
-                    money -= cost
-
+        # Sell everything in the shed — cash now beats sitting inventory.
         for item, amount in shed.items():
             qty = int(amount)
             if qty > 0:
                 ops.append([SELL, item, qty])
 
-        return ops
+        # HIRE hands at the start of each day. Cheap: first two cost $1 each.
+        if hour == 0:
+            n_hired = int(farm.get("hires_today", 0))
+            want = max(0, self.max_hands - len(farm.get("hands", [])))
+            for _ in range(want):
+                cost = _fib(n_hired)
+                if money < cost:
+                    break
+                ops.append([HIRE])
+                money -= cost
+                n_hired += 1
 
-    def _plan_farmer(self, obs, farm, private, day, fx, fy):
+        # Buy land (NE quadrant) on the chosen day if affordable.
+        if self.buy_land_day is not None and day >= self.buy_land_day:
+            if "NE" not in farm.get("unlocked_quadrants", []) and money >= 1000:
+                ops.append([BUY_LAND])
+                money -= 1000
+
+        # Buy seeds for the most profitable affordable crop(s).
+        preferred = self._preferred_crops(obs, farm, day)
+        for crop in preferred:
+            have = seeds.get(crop, 0)
+            if have < self.seed_buffer and money >= CROPS[crop]["seed"]:
+                ops.append([BUY_SEED, crop, 1])
+                money -= CROPS[crop]["seed"]
+                if len(ops) >= MAX_MARKET_ORDERS:
+                    break
+
+        return ops[:MAX_MARKET_ORDERS]
+
+    # ---- 2. unit coordination ---------------------------------------------- #
+    def _plan_units(self, obs, farm, private, day, positions):
         tiles = farm.get("tiles", [])
         seeds = private.get("seeds", {})
         size = len(tiles)
-        harvest, water, weed, plant = [], [], [], []
+        # priority buckets: water first (death), then harvest, dig, plant.
+        water, harvest, weed, plant = [], [], [], []
+        preferred = self._preferred_crops(obs, farm, day)
 
         for y in range(size):
             for x in range(size):
                 tile = tiles[y][x]
                 if tile is None:
-                    if any(seeds.get(c, 0) > 0 for c in self.crops):
+                    if any(seeds.get(c, 0) > 0 for c in preferred):
                         plant.append((x, y))
                 elif isinstance(tile, dict):
                     kind = tile.get("kind")
                     if kind == KIND_PLANT:
                         crop = tile.get("crop")
                         cd = CROPS.get(crop)
-                        age = day - int(tile.get("planted_day", day))
                         needs_water = not tile.get("watered_today", False)
                         if cd and cd["ongoing"]:
-                            # Ongoing crops (tomato/strawberry): harvest the
-                            # accumulated yield as soon as it appears.
                             if tile.get("yield_units", 0) > 0:
                                 harvest.append((x, y))
                             elif needs_water:
                                 water.append((x, y))
                         elif cd:
-                            # One-time crops (wheat/carrot/melon): wait until
-                            # max_yield_day so watering maximizes the yield,
-                            # then harvest. Never harvest an immature plant.
+                            age = day - int(tile.get("planted_day", day))
                             if age >= cd["max_yield_day"] and tile.get("yield_units", 0) > 0:
                                 harvest.append((x, y))
                             elif needs_water:
@@ -160,19 +211,57 @@ class FarmBrain:
                     elif kind == KIND_WEED:
                         weed.append((x, y))
 
-        # Water first: an unwatered plant dies (2 days -> weed). Then harvest
-        # (guaranteed money, about to decay), then clear weeds, then plant.
-        if water:
-            return _nearest(fx, fy, water), [WATER]
-        if harvest:
-            return _nearest(fx, fy, harvest), [HARVEST]
-        if weed:
-            return _nearest(fx, fy, weed), [DIG]
-        if plant:
-            for crop in self.crops:
-                if seeds.get(crop, 0) > 0:
-                    return _nearest(fx, fy, plant), [PLANT, crop]
-        return None, [PASS]
+        # Ordered task list: water(rank 0) > harvest(1) > dig(2) > plant(3).
+        tasks = []
+        for xy in water:
+            tasks.append((0, xy, [WATER]))
+        for xy in harvest:
+            tasks.append((1, xy, [HARVEST]))
+        for xy in weed:
+            tasks.append((2, xy, [DIG]))
+        for xy in plant:
+            crop = next((c for c in preferred if seeds.get(c, 0) > 0), None)
+            if crop:
+                tasks.append((3, xy, [PLANT, crop]))
+
+        # Assign each unit the nearest unassigned task (lower rank wins).
+        assigned = set()
+        cmds = []
+        for pos in positions:
+            best = None
+            for rank, xy, action in tasks:
+                if xy in assigned:
+                    continue
+                d = _manhattan(pos, xy)
+                key = (rank, d)
+                if best is None or key < best[0]:
+                    best = (key, xy, action)
+            if best is None:
+                cmds.append([PASS])
+                continue
+            (_, _), xy, action = best
+            assigned.add(xy)
+            if pos == xy:
+                cmds.append(action)
+            else:
+                cmds.append([step_toward(pos[0], pos[1], xy[0], xy[1])])
+        return cmds
+
+    # ---- 3. price-aware crop selection -------------------------------------- #
+    def _preferred_crops(self, obs, farm, day) -> list[str]:
+        prices = obs.get("market", {}).get("prices", {})
+        scored = []
+        for crop in self.crops:
+            cd = CROPS[crop]
+            # Must mature before season end (planting day counts toward growth).
+            if day + cd["max_yield_day"] > SEASON_DAYS - 1:
+                continue
+            yield_est = _unfertilized_yield(crop)
+            price = prices.get(crop, cd.get("base", 0))
+            profit = yield_est * price - cd["seed"]
+            scored.append((profit, crop))
+        scored.sort(reverse=True)
+        return [c for _, c in scored]
 
 
 _BRAIN = FarmBrain()
@@ -210,7 +299,7 @@ def validate_minimal_decision() -> dict:
         "town": {"unlocked_shops": []},
         "private": {
             "shed": {item: 0 for item in PRODUCTS + list(ANIMALS)},
-            "seeds": {"WHEAT": 1, "CARROT": 0},
+            "seeds": {"WHEAT": 1, "CARROT": 0, "TOMATO": 0, "STRAWBERRY": 0, "MELON": 0},
             "inventories": [{}],
         },
     }
