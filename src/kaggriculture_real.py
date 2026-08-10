@@ -132,6 +132,7 @@ class FarmBrain:
         buy_land_day: int | None = None,
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
+        premium_sell_floor: float | None = 100,
         animal: str | None = None,  # experimental; off by default (logistics > value)
         animal_day: int = 1,
     ) -> None:
@@ -144,6 +145,10 @@ class FarmBrain:
         # Max simultaneous premium plants on the field. Capping production
         # avoids flooding the shared market (town drains only ~1 premium/day).
         self.max_premium_plants = max_premium_plants
+        # Don't sell premium goods below this price (hold in shed until the
+        # market recovers); always dump in the final days of the season so no
+        # value is left in the shed.
+        self.premium_sell_floor = premium_sell_floor
         # Optional livestock: one animal type ("GOOSE"/"COW"/"SHEEP") bought on
         # `animal_day`, fed wheat daily, harvested for product + free fertilizer.
         self.animal = animal
@@ -173,13 +178,19 @@ class FarmBrain:
 
         # Sell everything in the shed — cash now beats sitting inventory.
         # Premium goods (melon/strawberry) crash the shared market if we dump
-        # too many at once, so cap how many of each we sell per turn. The shed
-        # caps at 100 units, so this is a timing lever, not a stockpile one.
+        # too many at once, so cap how many of each we sell per turn. Also hold
+        # them when the price is below a floor (the town drains the market and
+        # the price recovers). Always dump in the final days of the season so
+        # no value is left sitting in the shed.
+        prices = obs.get("market", {}).get("prices", {})
         for item, amount in shed.items():
             qty = int(amount)
             if qty <= 0:
                 continue
             if item in self.PREMIUM:
+                price = prices.get(item, 0)
+                if self.premium_sell_floor is not None and price < self.premium_sell_floor and day < SEASON_DAYS - 2:
+                    continue  # hold; price too low, will recover
                 qty = min(qty, self.premium_sell_per_turn)
             if qty > 0:
                 ops.append([SELL, item, qty])
