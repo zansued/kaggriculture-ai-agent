@@ -266,6 +266,32 @@ class TestFarmHandsAndPriceSelection(unittest.TestCase):
         self.assertIsNone(brain.animal)
         self.assertIsNone(brain.max_premium_plants)
         self.assertEqual(brain.premium_sell_per_turn, 2)
+        self.assertFalse(brain.fert_strawberry)  # default off: coordination cost > value
+
+    def test_fert_task_returns_pickup_when_fert_in_shed(self):
+        brain = FarmBrain(max_hands=2, seed_buffer=6, fert_strawberry=True)
+        obs = _real_obs(money=3000.0, day=10)
+        # A strawberry at its first production day, not fertilized.
+        tiles = [[None for _ in range(10)] for _ in range(10)]
+        tiles[2][3] = {
+            "kind": "PLANT", "crop": "STRAWBERRY", "planted_day": 0,
+            "watered_today": True, "consecutive_unwatered": 0, "yield_units": 0,
+            "max_lifespan_step": -1, "fertilized_until_day": -1,
+        }
+        obs["farms"][0]["tiles"] = tiles
+        obs["private"]["shed"]["FERTILIZER"] = 1
+        obs["market"]["prices"]["STRAWBERRY"] = 120
+        task = brain._plan_fert_task(obs, obs["farms"][0], obs["private"], 10, 10)
+        self.assertIsNotNone(task)
+        self.assertEqual(task[1][0], "PICKUP")
+
+    def test_fert_disabled_returns_none(self):
+        brain = FarmBrain(max_hands=2, seed_buffer=6, fert_strawberry=False)
+        obs = _real_obs(money=3000.0, day=10)
+        obs["private"]["shed"]["FERTILIZER"] = 1
+        obs["market"]["prices"]["STRAWBERRY"] = 120
+        task = brain._plan_fert_task(obs, obs["farms"][0], obs["private"], 10, 10)
+        self.assertIsNone(task)
 
     def test_animal_task_generation_requires_config(self):
         brain = FarmBrain()

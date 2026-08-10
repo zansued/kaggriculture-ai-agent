@@ -133,6 +133,7 @@ class FarmBrain:
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
         premium_sell_floor: float | None = 100,
+        fert_strawberry: bool = False,
         animal: str | None = None,  # experimental; off by default (logistics > value)
         animal_day: int = 1,
     ) -> None:
@@ -149,6 +150,12 @@ class FarmBrain:
         # market recovers); always dump in the final days of the season so no
         # value is left in the shed.
         self.premium_sell_floor = premium_sell_floor
+        # Fertilize strawberry: buy one fertilizer and apply it on the day the
+        # plant reaches first_yield_day so its first two productions (day X and
+        # X+interval) are doubled. Net value: +2 units * base ~ $120 each = +$240
+        # gross - $100 cost = +$140. Only applied when a strawberry exists and
+        # the market price makes the expected gain positive.
+        self.fert_strawberry = fert_strawberry
         # Optional livestock: one animal type ("GOOSE"/"COW"/"SHEEP") bought on
         # `animal_day`, fed wheat daily, harvested for product + free fertilizer.
         self.animal = animal
@@ -231,6 +238,17 @@ class FarmBrain:
                 if len(ops) >= MAX_MARKET_ORDERS:
                     break
 
+        # Fertilize strawberry: buy one fertilizer to apply on the first
+        # production day so the first two productions are doubled. Only buy if
+        # we have (or will plant) a strawberry and the expected gain is positive.
+        if self.fert_strawberry:
+            st_price = prices.get("STRAWBERRY", 120)
+            # +2 units from doubling first two productions, minus fertilizer cost.
+            ev = 2 * st_price - 100
+            if ev > 0 and shed.get("FERTILIZER", 0) == 0 and money >= 100:
+                ops.append([BUY_PRODUCT, "FERTILIZER", 1])
+                money -= 100
+
         # Optional livestock: buy the animal on `animal_day`; keep a wheat stock
         # for daily feed (animals escape after 2 unfed days). Buy wheat only
         # after the animal is placed (we know we have it once shed has it).
@@ -304,14 +322,21 @@ class FarmBrain:
         # Priority is higher than planting so we don't let animals escape.
         animal_tasks = self._plan_animal_tasks(obs, farm, private, day, size)
 
+        # ---- strawberry fertilizer ------------------------------------------- #
+        # If we have fertilizer and an unfertilized strawberry at/after its
+        # first production day, apply it (doubles the first two productions).
+        fert_task = self._plan_fert_task(obs, farm, private, day, size)
+
         # Ordered task list: water(0) > harvest(1) > dig(2) > plant(3), with
-        # livestock tasks (feed/harvest/build/place) at rank 0.5-ish inserted
-        # before crop work where they compete.
+        # livestock tasks (feed/harvest/build/place) at rank -1 (urgent) and
+        # fertilizer application at rank 1.5 (after watering, before dig).
         tasks = list(animal_tasks)
         for xy in water:
             tasks.append((0, xy, [WATER]))
         for xy in harvest:
             tasks.append((1, xy, [HARVEST]))
+        if fert_task:
+            tasks.append((1.5, fert_task[0], fert_task[1]))
         for xy in weed:
             tasks.append((2, xy, [DIG]))
         for xy in plant:
@@ -342,7 +367,51 @@ class FarmBrain:
                 cmds.append([step_toward(pos[0], pos[1], xy[0], xy[1])])
         return cmds
 
-    # ---- 3. livestock -------------------------------------------------------- #
+    # ---- 3. strawberry fertilizer -------------------------------------------- #
+    def _find_fert_target(self, obs, farm, day, size):
+        """Find an unfertilized strawberry at a production day, else None."""
+        cd = CROPS["STRAWBERRY"]
+        tiles = farm.get("tiles", [])
+        for y in range(size):
+            for x in range(size):
+                t = tiles[y][x]
+                if not (isinstance(t, dict) and t.get("kind") == KIND_PLANT and t.get("crop") == "STRAWBERRY"):
+                    continue
+                age = day - int(t.get("planted_day", day))
+                days_since_first = age - cd["first_yield_day"]
+                if days_since_first < 0 or days_since_first % cd["interval"] != 0:
+                    continue
+                if t.get("fertilized_until_day", -1) >= day:
+                    continue
+                return (x, y)
+        return None
+
+    def _plan_fert_task(self, obs, farm, private, day, size):
+        """Return a task to apply fertilizer to a strawberry.
+
+        Returns (tile, [FERTILIZE]) when a unit already carries fertilizer and
+        stands ready, or (shed_tile, [PICKUP FERTILIZER 1]) when fertilizer is
+        in the shed and needs to be picked up first. The coordinating hand will
+        resolve the two-step pickup->fertilize over consecutive turns.
+        """
+        if not self.fert_strawberry:
+            return None
+        st_price = obs.get("market", {}).get("prices", {}).get("STRAWBERRY", 120)
+        if 2 * st_price - 100 <= 0:
+            return None
+        target = self._find_fert_target(obs, farm, day, size)
+        if target is None:
+            return None
+        # Does any unit already hold fertilizer in its inventory?
+        for inv in private.get("inventories", []):
+            if inv.get("FERTILIZER", 0) > 0:
+                return target, [FERTILIZE]
+        # Otherwise the fertilizer sits in the shed; pick it up first.
+        if private.get("shed", {}).get("FERTILIZER", 0) > 0:
+            return _shed_tile(farm), [PICKUP, "FERTILIZER", 1]
+        return None
+
+    # ---- 4. livestock -------------------------------------------------------- #
     def _animal_placed(self, farm) -> bool:
         if self.animal is None:
             return False
