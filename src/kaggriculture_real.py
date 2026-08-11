@@ -201,7 +201,7 @@ class FarmBrain:
             if crops is None:
                 self.crops = ["MELON", "WHEAT", "STRAWBERRY"]
             if max_melon_plants is None:
-                max_melon_plants = 6
+                max_melon_plants = 10
             if max_wheat_plants is None:
                 max_wheat_plants = None
             if seed_buffers is None:
