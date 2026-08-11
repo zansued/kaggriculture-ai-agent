@@ -81,7 +81,19 @@ VARIANT_CONFIGS: dict[str, dict] = {
     # Full livestock economy (cows+sheep+strawberry).
     "livestock": {"livestock": True},
     "livestock_46": {"livestock": True, "animal_plan": [["COW", 4], ["SHEEP", 3]]},
+    # Strawberry tuning (on top of the 8+6 livestock default).
+    "st6": {"strawberry_target": 6},
+    "st8": {"strawberry_target": 8},
+    "st10": {"strawberry_target": 10},
+    "st12": {"strawberry_target": 12},
+    "s16": {"seed_buffers": {"MELON": 3, "WHEAT": 8, "STRAWBERRY": 16}},
+    "st8_s16": {"strawberry_target": 8, "seed_buffers": {"MELON": 3, "WHEAT": 8, "STRAWBERRY": 16}},
+    "st10_s16": {"strawberry_target": 10, "seed_buffers": {"MELON": 3, "WHEAT": 8, "STRAWBERRY": 16}},
+    "st8_wcap4": {"strawberry_target": 8, "max_wheat_plants": 4},
     "livestock_86": {"livestock": True, "animal_plan": [["COW", 8], ["SHEEP", 6]]},
+    "livestock_86_h8": {"livestock": True, "animal_plan": [["COW", 8], ["SHEEP", 6]], "livestock_hands": 8},
+    "livestock_86_h10": {"livestock": True, "animal_plan": [["COW", 8], ["SHEEP", 6]], "livestock_hands": 10},
+    "livestock_86_h12": {"livestock": True, "animal_plan": [["COW", 8], ["SHEEP", 6]], "livestock_hands": 12},
     "livestock_handsmix": {"livestock": True, "animal_plan": [["COW", 5], ["SHEEP", 4]], "livestock_hands": 10},
     # Melon plant gate: stop planting melon when its price < gate.
     "gate180": {"melon_plant_gate": 180},

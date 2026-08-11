@@ -133,7 +133,7 @@ class FarmBrain:
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
         premium_sell_floor: float | None = 100,
-        fert_strawberry: bool = False,
+        fert_strawberry: bool = True,
         animal: str | None = None,  # experimental; off by default (logistics > value)
         animal_day: int = 1,
         melon_plant_gate: float | None = 240,  # stop planting melon when price < gate
@@ -141,8 +141,10 @@ class FarmBrain:
         harvest_at_cap: bool = True,  # harvest one-time crops as soon as yield caps
         livestock: bool = True,  # full animal economy (cows+sheep+strawberry)
         animal_plan: list | None = None,  # e.g. [("COW",4),("SHEEP",3)]
-        livestock_hands: int = 6,  # hands to hire daily in livestock mode
+        livestock_hands: int = 8,  # hands to hire daily in livestock mode
         max_melon_plants: int | None = None,  # cap total melon plants (livestock)
+        max_wheat_plants: int | None = None,  # cap total wheat plants (livestock)
+        strawberry_target: int = 0,  # maintain this many strawberry plants (0=off)
         seed_buffers: dict | None = None,  # per-crop seed buffer override
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
@@ -186,20 +188,27 @@ class FarmBrain:
         # so prices hold. Needs many hands for daily feed/collect chores.
         self.livestock = livestock
         if livestock and animal_plan is None:
-            animal_plan = [("COW", 4), ("SHEEP", 3)]
+            # 8 cows + 6 sheep (purearch scale) with 8 hands benchmarked best.
+            animal_plan = [("COW", 8), ("SHEEP", 6)]
         self.animal_plan = animal_plan or []
         if livestock:
             self.max_hands = max(self.max_hands, livestock_hands)
-            # The livestock economy farms melon (early wave) + wheat (feed/sell)
-            # + strawberry (main income); tomato/carrot are nearly unused by the
-            # top strategy and just drain early cash.
+            # The livestock economy farms melon (early cash wave) + wheat
+            # (feed/sell) + strawberry (main late income). Tiles are the scarce
+            # resource: 14 animal structures leave only ~11 crop tiles, so melon
+            # is kept small (early cash only) and strawberry gets the tiles in
+            # the second half once melon is harvested.
             if crops is None:
                 self.crops = ["MELON", "WHEAT", "STRAWBERRY"]
             if max_melon_plants is None:
                 max_melon_plants = 6
+            if max_wheat_plants is None:
+                max_wheat_plants = None
             if seed_buffers is None:
                 seed_buffers = {"MELON": 3, "WHEAT": 8, "STRAWBERRY": 6}
         self.max_melon_plants = max_melon_plants
+        self.max_wheat_plants = max_wheat_plants
+        self.strawberry_target = strawberry_target
         self.seed_buffers = seed_buffers or {}
 
     # ---- public entrypoint ------------------------------------------------- #
@@ -248,6 +257,14 @@ class FarmBrain:
                 continue
             if self.livestock and item == "WHEAT":
                 qty = max(0, qty - feed_reserve)
+                if qty <= 0:
+                    continue
+            if self.livestock and self.fert_strawberry and item == "FERTILIZER":
+                # Reserve free animal fertilizer for strawberry fertilization —
+                # using it doubles the next strawberry production (~$110 value)
+                # which beats selling it (~$95).
+                reserve = self._strawberry_fert_reserve(farm)
+                qty = max(0, qty - reserve)
                 if qty <= 0:
                     continue
             if item in self.PREMIUM:
@@ -333,6 +350,7 @@ class FarmBrain:
         preferred = self._preferred_crops(obs, farm, day)
         active_premium = self._count_premium_plants(farm)
         active_melon = self._count_melon_plants(farm)
+        active_wheat = self._count_wheat_plants(farm)
         for crop in preferred:
             if (
                 crop in self.PREMIUM
@@ -346,6 +364,12 @@ class FarmBrain:
                 and active_melon >= self.max_melon_plants
             ):
                 continue
+            if (
+                crop == "WHEAT"
+                and self.max_wheat_plants is not None
+                and active_wheat >= self.max_wheat_plants
+            ):
+                continue
             buffer = self.seed_buffers.get(crop, self.seed_buffer)
             have = seeds.get(crop, 0)
             if have < buffer and money >= CROPS[crop]["seed"]:
@@ -353,17 +377,6 @@ class FarmBrain:
                 money -= CROPS[crop]["seed"]
                 if len(ops) >= MAX_MARKET_ORDERS:
                     break
-
-        # Fertilize strawberry: buy one fertilizer to apply on the first
-        # production day so the first two productions are doubled. Only buy if
-        # we have (or will plant) a strawberry and the expected gain is positive.
-        if self.fert_strawberry:
-            st_price = prices.get("STRAWBERRY", 120)
-            # +2 units from doubling first two productions, minus fertilizer cost.
-            ev = 2 * st_price - 100
-            if ev > 0 and shed.get("FERTILIZER", 0) == 0 and money >= 100:
-                ops.append([BUY_PRODUCT, "FERTILIZER", 1])
-                money -= 100
 
         # Optional livestock: buy the animal on `animal_day`; keep a wheat stock
         # for daily feed (animals escape after 2 unfed days). Buy wheat only
@@ -388,6 +401,7 @@ class FarmBrain:
         tiles = farm.get("tiles", [])
         seeds = private.get("seeds", {})
         size = len(tiles)
+        inventories = private.get("inventories", [])
         # priority buckets: water first (death), then harvest, dig, plant.
         water, harvest, weed, plant = [], [], [], []
         preferred = self._preferred_crops(obs, farm, day)
@@ -443,6 +457,12 @@ class FarmBrain:
                         and self._count_melon_plants(farm) >= self.max_melon_plants
                     ):
                         continue
+                    if (
+                        c == "WHEAT"
+                        and self.max_wheat_plants is not None
+                        and self._count_wheat_plants(farm) >= self.max_wheat_plants
+                    ):
+                        continue
                     return c
             return None
 
@@ -451,23 +471,61 @@ class FarmBrain:
         animal_tasks = self._plan_animal_tasks(obs, farm, private, day, size)
 
         # ---- strawberry fertilizer ------------------------------------------- #
-        # If we have fertilizer and an unfertilized strawberry at/after its
-        # first production day, apply it (doubles the first two productions).
-        fert_task = self._plan_fert_task(obs, farm, private, day, size)
+        # Applying free animal fertilizer to production-day strawberries doubles
+        # that production. The FIRST hand is dedicated to the fertilizer chain
+        # (PICKUP -> FERTILIZE) whenever there is work, so the hand carrying
+        # fertilizer is never pulled away to feed/farm chores mid-chain. When
+        # the specialist is off, fert tasks fall into the shared pool instead.
+        fert_targets = self._find_fert_targets(obs, farm, day, size)
+        fert_specialist_cmd = None
+        if self.livestock and fert_targets and len(positions) > 1:
+            hx, hy = positions[1]
+            hand_inv = inventories[1] if len(inventories) > 1 else {}
+            if hand_inv.get("FERTILIZER", 0) > 0:
+                t = _nearest(hx, hy, fert_targets)
+                fert_specialist_cmd = [FERTILIZE] if (hx, hy) == t else [step_toward(hx, hy, t[0], t[1])]
+            elif private.get("shed", {}).get("FERTILIZER", 0) > 0:
+                st = _shed_tile(farm)
+                batch = min(private["shed"].get("FERTILIZER", 0), len(fert_targets), 3)
+                fert_specialist_cmd = [PICKUP, "FERTILIZER", batch] if (hx, hy) == st else [step_toward(hx, hy, st[0], st[1])]
+        fert_tasks = self._plan_fert_tasks(obs, farm, private, day, size)
 
         # Ordered task list: water(0) > harvest(1) > dig(2) > plant(3), with
         # livestock tasks (feed/harvest/build/place) at rank -1 (urgent) and
-        # fertilizer application at rank 1.5 (after watering, before dig).
+        # strawberry fertilizer just above watering.
         tasks = list(animal_tasks)
+        if fert_specialist_cmd is None:
+            tasks.extend(fert_tasks)
         for xy in water:
             tasks.append((0, xy, [WATER], None, False))
         for xy in harvest:
             tasks.append((1, xy, [HARVEST], None, False))
-        if fert_task:
-            tasks.append((1.5, fert_task[0], fert_task[1], fert_task[2], False))
         for xy in weed:
             tasks.append((2, xy, [DIG], None, False))
+        # Maintain the strawberry field: ongoing plants decay after max_yield
+        # productions, so replant empty tiles to keep the count near target.
+        # Rank 1.1 (after water/harvest, before dig/fert) so it beats generic
+        # planting and actually happens while hands are nearby.
+        st_priority = set()
+        if self.livestock and day >= 4:
+            st_count = self._count_strawberry_plants(farm)
+            st_seeds = seeds.get("STRAWBERRY", 0)
+            need = max(0, self.strawberry_target - st_count)
+            for xy in plant:
+                if need <= 0:
+                    break
+                if st_seeds <= 0:
+                    break
+                # Strawberry must still mature before season end.
+                if day + CROPS["STRAWBERRY"]["max_yield_day"] > SEASON_DAYS - 1:
+                    break
+                tasks.append((1.1, xy, [PLANT, "STRAWBERRY"], None, False))
+                st_priority.add(xy)
+                st_seeds -= 1
+                need -= 1
         for xy in plant:
+            if xy in st_priority:
+                continue
             crop = _plantable_crop()
             if crop:
                 tasks.append((3, xy, [PLANT, crop], None, False))
@@ -476,11 +534,15 @@ class FarmBrain:
         # rank wins). The farmer (unit 0) is processed first and animal chores
         # have the highest priority, so it naturally leads the logistics chain.
         # `shareable` tasks (shed restocking) may be taken by several units at
-        # once — they are never added to the assigned set.
+        # once — they are never added to the assigned set. The first hand (i=1)
+        # is the fertilizer specialist when a chain is active.
         inventories = private.get("inventories", [])
         assigned = set()
         cmds = []
         for i, pos in enumerate(positions):
+            if i == 1 and fert_specialist_cmd is not None:
+                cmds.append(fert_specialist_cmd)
+                continue
             inv = inventories[i] if i < len(inventories) else {}
             best = None
             for rank, xy, action, cap, shareable in tasks:
@@ -505,10 +567,11 @@ class FarmBrain:
         return cmds
 
     # ---- 3. strawberry fertilizer -------------------------------------------- #
-    def _find_fert_target(self, obs, farm, day, size):
-        """Find an unfertilized strawberry at a production day, else None."""
+    def _find_fert_targets(self, obs, farm, day, size) -> list[tuple[int, int]]:
+        """All unfertilized strawberries at a production day."""
         cd = CROPS["STRAWBERRY"]
         tiles = farm.get("tiles", [])
+        out = []
         for y in range(size):
             for x in range(size):
                 t = tiles[y][x]
@@ -520,33 +583,39 @@ class FarmBrain:
                     continue
                 if t.get("fertilized_until_day", -1) >= day:
                     continue
-                return (x, y)
-        return None
+                out.append((x, y))
+        return out
 
-    def _plan_fert_task(self, obs, farm, private, day, size):
-        """Return a task to apply fertilizer to a strawberry.
+    def _plan_fert_tasks(self, obs, farm, private, day, size) -> list:
+        """High-priority tasks for applying free animal fertilizer to strawberry.
 
-        Returns (tile, [FERTILIZE]) when a unit already carries fertilizer and
-        stands ready, or (shed_tile, [PICKUP FERTILIZER 1]) when fertilizer is
-        in the shed and needs to be picked up first. The coordinating hand will
-        resolve the two-step pickup->fertilize over consecutive turns.
+        Fertilizer on a production-day strawberry doubles that production (~$110
+        value) which beats selling it (~$95). These tasks must out-rank watering
+        and harvest — otherwise the hand carrying fertilizer gets pulled away to
+        farm chores and never fertilizes. Emits a shareable PICKUP FERTILIZER
+        (at the shed) so several hands can restock, and a FERTILIZE per target
+        that only a fertilizer-carrying unit may take.
         """
         if not self.fert_strawberry:
-            return None
-        st_price = obs.get("market", {}).get("prices", {}).get("STRAWBERRY", 120)
-        if 2 * st_price - 100 <= 0:
-            return None
-        target = self._find_fert_target(obs, farm, day, size)
-        if target is None:
-            return None
-        # Does any unit already hold fertilizer in its inventory?
-        for inv in private.get("inventories", []):
-            if inv.get("FERTILIZER", 0) > 0:
-                return target, [FERTILIZE], "FERT"
-        # Otherwise the fertilizer sits in the shed; pick it up first.
-        if private.get("shed", {}).get("FERTILIZER", 0) > 0:
-            return _shed_tile(farm), [PICKUP, "FERTILIZER", 1], "!FERT"
-        return None
+            return []
+        shed_fert = private.get("shed", {}).get("FERTILIZER", 0)
+        targets = self._find_fert_targets(obs, farm, day, size)
+        if not targets:
+            return []
+        n_carry = sum(1 for inv in private.get("inventories", []) if inv.get("FERTILIZER", 0) > 0)
+        tasks = []
+        if n_carry > 0:
+            for xy in targets:
+                tasks.append((-0.4, xy, [FERTILIZE], "FERT", False))
+        elif shed_fert > 0:
+            # Restock: shareable shed tile, one task per free unit up to need.
+            n_free = sum(
+                1 for inv in private.get("inventories", [])
+                if inv.get("FERTILIZER", 0) <= 0 and not any(a in inv for a in ANIMALS)
+            )
+            for _ in range(min(n_free, len(targets), 3)):
+                tasks.append((-0.5, _shed_tile(farm), [PICKUP, "FERTILIZER", 1], "!FERT", True))
+        return tasks
 
     # ---- 4. livestock -------------------------------------------------------- #
     def _animal_placed(self, farm) -> bool:
@@ -732,6 +801,36 @@ class FarmBrain:
             and tiles[y][x].get("kind") == KIND_PLANT
             and tiles[y][x].get("crop") == "MELON"
         )
+
+    def _count_strawberry_plants(self, farm) -> int:
+        tiles = farm.get("tiles", [])
+        return sum(
+            1
+            for y in range(len(tiles))
+            for x in range(len(tiles[y]))
+            if isinstance(tiles[y][x], dict)
+            and tiles[y][x].get("kind") == KIND_PLANT
+            and tiles[y][x].get("crop") == "STRAWBERRY"
+        )
+
+    def _count_wheat_plants(self, farm) -> int:
+        tiles = farm.get("tiles", [])
+        return sum(
+            1
+            for y in range(len(tiles))
+            for x in range(len(tiles[y]))
+            if isinstance(tiles[y][x], dict)
+            and tiles[y][x].get("kind") == KIND_PLANT
+            and tiles[y][x].get("crop") == "WHEAT"
+        )
+
+    def _strawberry_fert_reserve(self, farm) -> int:
+        """How many fertilizer units to keep in the shed for strawberry
+        fertilization: one per active strawberry plant (applied on its next
+        production day, fertilized_until covers 2-3 production cycles)."""
+        if not self.fert_strawberry:
+            return 0
+        return self._count_strawberry_plants(farm)
 
     # ---- 5. price-aware crop selection -------------------------------------- #
     def _preferred_crops(self, obs, farm, day) -> list[str]:
