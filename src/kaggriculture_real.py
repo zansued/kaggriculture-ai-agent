@@ -201,7 +201,7 @@ class FarmBrain:
             if crops is None:
                 self.crops = ["MELON", "WHEAT", "STRAWBERRY"]
             if max_melon_plants is None:
-                max_melon_plants = 10
+                max_melon_plants = 6
             if max_wheat_plants is None:
                 max_wheat_plants = None
             if seed_buffers is None:
@@ -542,6 +542,13 @@ class FarmBrain:
             if crop:
                 tasks.append((3, xy, [PLANT, crop], None, False))
 
+        # Assign each unit the nearest unassigned task it is CAPABLE of (lower
+        # rank wins). The farmer (unit 0) is processed first and animal chores
+        # have the highest priority, so it naturally leads the logistics chain.
+        # `shareable` tasks (shed restocking) may be taken by several units at
+        # once — they are never added to the assigned set. The first hand (i=1)
+        # is the fertilizer specialist when a chain is active.
+        #
         # Assign each unit the nearest unassigned task it is CAPABLE of (lower
         # rank wins). The farmer (unit 0) is processed first and animal chores
         # have the highest priority, so it naturally leads the logistics chain.
