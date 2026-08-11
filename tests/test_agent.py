@@ -75,7 +75,7 @@ class TestRealProtocolAgent(unittest.TestCase):
     def test_plants_wheat_when_seed_and_empty_tile(self):
         obs = _real_obs()
         obs["private"]["seeds"]["WHEAT"] = 1
-        action = agent(obs, None)
+        action = FarmBrain(livestock=False).decide(obs)
         self.assertEqual(action["farmer"][0], "PLANT")
         self.assertEqual(action["farmer"][1], "WHEAT")
 
@@ -93,7 +93,7 @@ class TestRealProtocolAgent(unittest.TestCase):
             "fertilized_until_day": -1,
         }
         obs = _real_obs(tiles=tiles, day=2)
-        action = agent(obs, None)
+        action = FarmBrain(livestock=False).decide(obs)
         self.assertEqual(action["farmer"][0], "WATER")
 
     def test_harvests_mature_one_time_crop(self):
@@ -110,7 +110,7 @@ class TestRealProtocolAgent(unittest.TestCase):
             "fertilized_until_day": -1,
         }
         obs = _real_obs(tiles=tiles, day=4)
-        action = agent(obs, None)
+        action = FarmBrain(livestock=False).decide(obs)
         self.assertEqual(action["farmer"][0], "HARVEST")
 
     def test_harvests_ongoing_crop_with_yield(self):
@@ -127,14 +127,14 @@ class TestRealProtocolAgent(unittest.TestCase):
             "fertilized_until_day": -1,
         }
         obs = _real_obs(tiles=tiles, day=9)
-        action = agent(obs, None)
+        action = FarmBrain(livestock=False).decide(obs)
         self.assertEqual(action["farmer"][0], "HARVEST")
 
     def test_digs_weed(self):
         tiles = [[None for _ in range(10)] for _ in range(10)]
         tiles[4][4] = {"kind": "WEED"}
         obs = _real_obs(tiles=tiles)
-        action = agent(obs, None)
+        action = FarmBrain(livestock=False).decide(obs)
         self.assertEqual(action["farmer"][0], "DIG")
 
     def test_sells_shed_inventory(self):
@@ -159,7 +159,7 @@ class TestRealProtocolAgent(unittest.TestCase):
 
     def test_plants_preferred_crop_in_inventory(self):
         # CARROT is in crops list; if only CARROT seeds available, plant CARROT.
-        brain = FarmBrain(crops=["WHEAT", "CARROT"])
+        brain = FarmBrain(crops=["WHEAT", "CARROT"], livestock=False)
         obs = _real_obs()
         obs["private"]["seeds"]["WHEAT"] = 0
         obs["private"]["seeds"]["CARROT"] = 2
@@ -294,7 +294,7 @@ class TestFarmHandsAndPriceSelection(unittest.TestCase):
         self.assertIsNone(task)
 
     def test_animal_task_generation_requires_config(self):
-        brain = FarmBrain()
+        brain = FarmBrain(livestock=False)
         obs = _real_obs(money=3000.0, day=5)
         obs["farms"][0]["tiles"] = [
             [None if (x < 5 and y < 5) else "LOCKED" for x in range(10)] for y in range(10)

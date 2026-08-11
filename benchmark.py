@@ -21,8 +21,17 @@ import time
 
 from kaggle_environments import make
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+REPO = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(REPO, "src"))
 import kaggriculture_real as kr  # noqa: E402
+
+# Custom (function) opponents, e.g. the reconstructed 2600-Elo public agent.
+sys.path.insert(0, os.path.join(REPO, "reference", "opponents"))
+import purearch_opponent  # noqa: E402
+
+OPPONENT_FUNCTIONS = {
+    "purearch": purearch_opponent.agent,
+}
 
 # Named FarmBrain variants. "default" is the committed default config.
 VARIANT_CONFIGS: dict[str, dict] = {
@@ -69,6 +78,11 @@ VARIANT_CONFIGS: dict[str, dict] = {
     "harvcap_g220": {"harvest_at_cap": True, "melon_plant_gate": 220},
     "harvcap_g230": {"harvest_at_cap": True, "melon_plant_gate": 230},
     "harvcap_g250": {"harvest_at_cap": True, "melon_plant_gate": 250},
+    # Full livestock economy (cows+sheep+strawberry).
+    "livestock": {"livestock": True},
+    "livestock_46": {"livestock": True, "animal_plan": [["COW", 4], ["SHEEP", 3]]},
+    "livestock_86": {"livestock": True, "animal_plan": [["COW", 8], ["SHEEP", 6]]},
+    "livestock_handsmix": {"livestock": True, "animal_plan": [["COW", 5], ["SHEEP", 4]], "livestock_hands": 10},
     # Melon plant gate: stop planting melon when its price < gate.
     "gate180": {"melon_plant_gate": 180},
     "gate200": {"melon_plant_gate": 200},
@@ -110,13 +124,21 @@ def run_game(agent, opponent, seed, steps: int):
     return r0, r1, st0, st1
 
 
+def resolve_opponent(opponent: str):
+    """Return the env.run opponent argument (built-in string or callable)."""
+    if opponent in OPPONENT_FUNCTIONS:
+        return OPPONENT_FUNCTIONS[opponent]
+    return opponent
+
+
 def benchmark_variant(name: str, config: dict, opponent: str, seeds: list[int], steps: int):
     agent = make_agent(config)
+    opp = resolve_opponent(opponent)
     results = []
     for seed in seeds:
         t0 = time.time()
         try:
-            r0, r1, st0, st1 = run_game(agent, opponent, seed, steps)
+            r0, r1, st0, st1 = run_game(agent, opp, seed, steps)
             elapsed = time.time() - t0
             ok = st0 == "DONE" and r0 is not None
             results.append({"seed": seed, "mine": r0, "opp": r1,
@@ -165,7 +187,8 @@ def parse_seeds(seed_spec: str) -> list[int]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--opponent", default="starter", choices=["starter", "random", "pass"])
+    ap.add_argument("--opponent", default="starter",
+                    choices=["starter", "random", "pass"] + list(OPPONENT_FUNCTIONS))
     ap.add_argument("--seeds", default="1,2,3", help="comma list of seeds, or 'auto' (1..10)")
     ap.add_argument("--steps", type=int, default=720, help="episodeSteps per game")
     ap.add_argument("--variant", default="default", help="single variant name (see VARIANT_CONFIGS)")

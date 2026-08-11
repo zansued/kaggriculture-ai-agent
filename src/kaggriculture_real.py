@@ -139,6 +139,11 @@ class FarmBrain:
         melon_plant_gate: float | None = 240,  # stop planting melon when price < gate
         melon_focus: bool = False,  # while gate open, buy/plant ONLY melon
         harvest_at_cap: bool = True,  # harvest one-time crops as soon as yield caps
+        livestock: bool = True,  # full animal economy (cows+sheep+strawberry)
+        animal_plan: list | None = None,  # e.g. [("COW",4),("SHEEP",3)]
+        livestock_hands: int = 6,  # hands to hire daily in livestock mode
+        max_melon_plants: int | None = None,  # cap total melon plants (livestock)
+        seed_buffers: dict | None = None,  # per-crop seed buffer override
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -176,6 +181,26 @@ class FarmBrain:
         # 10 vs max_yield_day 12). Harvesting as soon as the yield is maxed frees
         # the tile ~2 days earlier per cycle for replanting.
         self.harvest_at_cap = harvest_at_cap
+        # Full livestock economy (cows+sheep). Animals produce milk/wool plus 1
+        # fertilizer/day each, and their products have shop demand (unlike melon)
+        # so prices hold. Needs many hands for daily feed/collect chores.
+        self.livestock = livestock
+        if livestock and animal_plan is None:
+            animal_plan = [("COW", 4), ("SHEEP", 3)]
+        self.animal_plan = animal_plan or []
+        if livestock:
+            self.max_hands = max(self.max_hands, livestock_hands)
+            # The livestock economy farms melon (early wave) + wheat (feed/sell)
+            # + strawberry (main income); tomato/carrot are nearly unused by the
+            # top strategy and just drain early cash.
+            if crops is None:
+                self.crops = ["MELON", "WHEAT", "STRAWBERRY"]
+            if max_melon_plants is None:
+                max_melon_plants = 6
+            if seed_buffers is None:
+                seed_buffers = {"MELON": 3, "WHEAT": 8, "STRAWBERRY": 6}
+        self.max_melon_plants = max_melon_plants
+        self.seed_buffers = seed_buffers or {}
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -206,10 +231,24 @@ class FarmBrain:
         # the price recovers). Always dump in the final days of the season so
         # no value is left sitting in the shed.
         prices = obs.get("market", {}).get("prices", {})
+        # Livestock feed reserve: never sell wheat that animals need today.
+        feed_reserve = 0
+        if self.livestock:
+            invs = private.get("inventories", [])
+            pending = sum(shed.get(a, 0) + sum(inv.get(a, 0) for inv in invs)
+                          for a, _ in self.animal_plan)
+            feed_reserve = self._total_animals(farm) + pending
         for item, amount in shed.items():
             qty = int(amount)
             if qty <= 0:
                 continue
+            if item in ANIMALS:
+                # Never sell animals — they're bought for placement, not resale.
+                continue
+            if self.livestock and item == "WHEAT":
+                qty = max(0, qty - feed_reserve)
+                if qty <= 0:
+                    continue
             if item in self.PREMIUM:
                 price = prices.get(item, 0)
                 if self.premium_sell_floor is not None and price < self.premium_sell_floor and day < SEASON_DAYS - 2:
@@ -236,10 +275,46 @@ class FarmBrain:
                 ops.append([BUY_LAND])
                 money -= 1000
 
+        # Full livestock economy: buy cows+sheep per the plan, keep wheat feed.
+        # Placed BEFORE seeds so the market-order cap never starves the animals.
+        if self.livestock:
+            size = len(farm.get("tiles", []))
+            invs = private.get("inventories", [])
+            # 1) Reserve feed wheat for every animal (placed + pending placement
+            #    in shed/inventory) BEFORE buying anything else — animals escape
+            #    after 2 unfed days, so feed supply is the #1 priority.
+            n_animals = self._total_animals(farm)
+            n_pending = sum(
+                shed.get(a, 0) + sum(inv.get(a, 0) for inv in invs)
+                for a, _ in self.animal_plan
+            )
+            feed_need = n_animals + n_pending
+            have_wheat = shed.get("WHEAT", 0) + sum(inv.get("WHEAT", 0) for inv in invs)
+            if feed_need > 0 and have_wheat < feed_need and money >= 25:
+                want = min(feed_need - have_wheat, 4)
+                ops.append([BUY_PRODUCT, "WHEAT", want])
+                money -= 25 * want
+            # 2) Buy animals only if the feed reserve is covered and we keep a
+            #    cash floor for future feed. Allow a small pipeline of animals
+            #    waiting to be placed so placement isn't the bottleneck.
+            for animal, target in self.animal_plan:
+                a = ANIMALS[animal]
+                placed = self._placed_count(farm, animal)
+                in_shed = shed.get(animal, 0)
+                in_inv = sum(inv.get(animal, 0) for inv in invs)
+                pipeline = in_shed + in_inv
+                if placed < target and pipeline < 2 and self._room_for_structure(farm, size, a["structure"]):
+                    if money - a["cost"] >= 200 and money >= a["cost"]:
+                        ops.append([BUY_ANIMAL, animal, 1])
+                        money -= a["cost"]
+                        if len(ops) >= MAX_MARKET_ORDERS:
+                            return ops[:MAX_MARKET_ORDERS]
+
         # Buy seeds for the most profitable affordable crop(s). Skip premium
         # crops when we already have enough active plants (production cap).
         preferred = self._preferred_crops(obs, farm, day)
         active_premium = self._count_premium_plants(farm)
+        active_melon = self._count_melon_plants(farm)
         for crop in preferred:
             if (
                 crop in self.PREMIUM
@@ -247,8 +322,15 @@ class FarmBrain:
                 and active_premium >= self.max_premium_plants
             ):
                 continue
+            if (
+                crop == "MELON"
+                and self.max_melon_plants is not None
+                and active_melon >= self.max_melon_plants
+            ):
+                continue
+            buffer = self.seed_buffers.get(crop, self.seed_buffer)
             have = seeds.get(crop, 0)
-            if have < self.seed_buffer and money >= CROPS[crop]["seed"]:
+            if have < buffer and money >= CROPS[crop]["seed"]:
                 ops.append([BUY_SEED, crop, 1])
                 money -= CROPS[crop]["seed"]
                 if len(ops) >= MAX_MARKET_ORDERS:
@@ -335,6 +417,12 @@ class FarmBrain:
                         c in self.PREMIUM
                         and self.max_premium_plants is not None
                         and active_premium >= self.max_premium_plants
+                    ):
+                        continue
+                    if (
+                        c == "MELON"
+                        and self.max_melon_plants is not None
+                        and self._count_melon_plants(farm) >= self.max_melon_plants
                     ):
                         continue
                     return c
@@ -465,52 +553,86 @@ class FarmBrain:
                     return (x, y)
         return None
 
+    # ---- 4b. multi-animal livestock economy ---------------------------------- #
+    def _all_animals(self, farm):
+        """Yield (x, y, tile) for every tile holding a placed animal."""
+        tiles = farm.get("tiles", [])
+        for y in range(len(tiles)):
+            for x in range(len(tiles[y])):
+                t = tiles[y][x]
+                if isinstance(t, dict) and t.get("animal"):
+                    yield x, y, t
+
+    def _placed_count(self, farm, animal: str) -> int:
+        return sum(1 for _, _, t in self._all_animals(farm) if t.get("animal") == animal)
+
+    def _total_animals(self, farm) -> int:
+        return sum(1 for _ in self._all_animals(farm))
+
+    def _any_carry(self, private, item: str) -> bool:
+        return any(inv.get(item, 0) > 0 for inv in private.get("inventories", []))
+
+    def _room_for_structure(self, farm, size, structure_kind) -> bool:
+        """True if an empty tile exists to build a structure on."""
+        if self._find_empty_structure(farm, structure_kind) is not None:
+            return True
+        tiles = farm.get("tiles", [])
+        return any(t is None for row in tiles for t in row)
+
     def _plan_animal_tasks(self, obs, farm, private, day, size):
         """Livestock chores, ranked just above watering so animals never escape."""
-        if self.animal is None:
+        if not self.livestock:
             return []
-        a = ANIMALS[self.animal]
         shed = private.get("shed", {})
-        tasks = []
-        animal_tile = self._find_animal_tile(farm)
+        tasks: list = []
+        tiles = farm.get("tiles", [])
 
-        if animal_tile is None:
-            # Animal not placed yet. Build the structure on an empty tile, or
-            # place the animal if a structure already exists.
+        # ---- (A) chores for already-placed animals --------------------------
+        # Feed needs a unit carrying wheat: emit PICKUP WHEAT at the shed first,
+        # then FEED next turn when a unit carries it.
+        for x, y, t in self._all_animals(farm):
+            animal = t["animal"]
+            if not t.get("fed_today", False):
+                if self._any_carry(private, "WHEAT"):
+                    tasks.append((-1, (x, y), [FEED]))
+                else:
+                    tasks.append((-1, _shed_tile(farm), [PICKUP, "WHEAT", 1]))
+            if t.get("fertilizer_available", False):
+                tasks.append((-1, (x, y), [COLLECT_FERTILIZER]))
+            if t.get("yield_units", 0) > 0:
+                tasks.append((-1, (x, y), [HARVEST]))
+            if not t.get("cared_today", False):
+                tasks.append((-1, (x, y), [CARE]))
+
+        # ---- (B) place unplaced animals: build structure, then place --------
+        for animal, target in self.animal_plan:
+            a = ANIMALS[animal]
+            placed = self._placed_count(farm, animal)
+            if placed >= target:
+                continue
+            in_shed = shed.get(animal, 0)
+            in_inv = sum(inv.get(animal, 0) for inv in private.get("inventories", []))
             structure_kind = a["structure"]
             empty_struct = self._find_empty_structure(farm, structure_kind)
             if empty_struct is not None:
-                # The animal must be in a unit's inventory to be PLACEd. If it's
-                # still in the shed, PICK it up first — but PICKUP only works
-                # from a shed-adjacent tile (farmer spawns at (4,4), adjacent).
-                # Emit PICKUP on the nearest shed-access tile; the next turn the
-                # inventory carries it and we PLACE on the structure.
-                if shed.get(self.animal, 0) > 0:
-                    # Stand on a shed-adjacent tile to pick it up.
-                    tasks.append((-1, _shed_tile(farm), [PICKUP, self.animal, 1]))
-                else:
-                    # Assume it's already in some inventory; place it.
-                    tasks.append((-1, empty_struct, [PLACE, self.animal, 1]))
+                if in_inv > 0:
+                    tasks.append((-1, empty_struct, [PLACE, animal, 1]))
+                elif in_shed > 0:
+                    tasks.append((-1, _shed_tile(farm), [PICKUP, animal, 1]))
             else:
-                # Find an empty tile to build on.
-                tiles = farm.get("tiles", [])
+                # Build enough structures for the animals currently available
+                # (in shed or carried) plus one incoming from the market.
+                available = in_shed + in_inv + (1 if placed + in_shed + in_inv < target else 0)
+                if available <= 0:
+                    continue
+                build = BUILD_COOP if structure_kind == KIND_COOP else BUILD_PASTURE
                 for y in range(size):
                     for x in range(size):
                         if tiles[y][x] is None:
-                            build = BUILD_COOP if structure_kind == KIND_COOP else BUILD_PASTURE
                             tasks.append((-1, (x, y), [build]))
-                            return tasks
-            return tasks
-
-        # Animal placed: feed, collect fertilizer, harvest product.
-        x, y = animal_tile
-        tile = farm["tiles"][y][x]
-        if not tile.get("fed_today", False):
-            tasks.append((-1, (x, y), [FEED]))
-        if tile.get("fertilizer_available", False):
-            tasks.append((-1, (x, y), [COLLECT_FERTILIZER]))
-        if tile.get("yield_units", 0) > 0:
-            tasks.append((-1, (x, y), [HARVEST]))
+                            available -= 1
+                            if available <= 0:
+                                return tasks
         return tasks
 
     # ---- 4. premium production cap ------------------------------------------- #
@@ -523,6 +645,17 @@ class FarmBrain:
             if isinstance(tiles[y][x], dict)
             and tiles[y][x].get("kind") == KIND_PLANT
             and tiles[y][x].get("crop") in self.PREMIUM
+        )
+
+    def _count_melon_plants(self, farm) -> int:
+        tiles = farm.get("tiles", [])
+        return sum(
+            1
+            for y in range(len(tiles))
+            for x in range(len(tiles[y]))
+            if isinstance(tiles[y][x], dict)
+            and tiles[y][x].get("kind") == KIND_PLANT
+            and tiles[y][x].get("crop") == "MELON"
         )
 
     # ---- 5. price-aware crop selection -------------------------------------- #
@@ -540,11 +673,17 @@ class FarmBrain:
             # Must mature before season end (planting day counts toward growth).
             if day + cd["max_yield_day"] > SEASON_DAYS - 1:
                 continue
+            # Livestock mode: strawberry seeds/plants start on day 4 to save early
+            # cash for animals (matches the top agent's schedule).
+            if self.livestock and crop == "STRAWBERRY" and day < 4:
+                continue
             # Melon gate: once the melon market is saturated (price below gate),
             # stop planting melons — the glut crashes the price to $1 anyway.
             price = prices.get(crop, cd.get("base", 0))
-            if crop == "MELON" and self.melon_plant_gate is not None:
-                if price < self.melon_plant_gate:
+            if crop == "MELON":
+                if self.melon_plant_gate is not None and price < self.melon_plant_gate:
+                    continue
+                if self.max_melon_plants is not None and self._count_melon_plants(farm) >= self.max_melon_plants:
                     continue
             yield_est = _unfertilized_yield(crop)
             profit = yield_est * price - cd["seed"]
