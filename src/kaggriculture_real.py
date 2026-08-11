@@ -549,12 +549,17 @@ class FarmBrain:
         # once — they are never added to the assigned set. The first hand (i=1)
         # is the fertilizer specialist when a chain is active.
         #
-        # Assign each unit the nearest unassigned task it is CAPABLE of (lower
-        # rank wins). The farmer (unit 0) is processed first and animal chores
-        # have the highest priority, so it naturally leads the logistics chain.
-        # `shareable` tasks (shed restocking) may be taken by several units at
-        # once — they are never added to the assigned set. The first hand (i=1)
-        # is the fertilizer specialist when a chain is active.
+        # SPATIAL ZONING: the last 3 units are "field hands" that only work
+        # tasks on the outer ring (distance > FIELD_RADIUS from the shed), so
+        # crops on expanded land actually get watered/harvested. Without this,
+        # every unit clusters on the near-shed animal chores and distant
+        # strawberry is never tended (st_watered=0, plants wither). Field hands
+        # relax to any task when the outer ring is idle (e.g. pre-land).
+        FIELD_RADIUS = 3
+        # Only zone when expanded land exists; pre-land all units work the whole
+        # board (zoning starves the animal chore pool otherwise).
+        zoning = len(farm.get("unlocked_quadrants", [])) > 1
+        field_start = max(1, len(positions) - 3)
         inventories = private.get("inventories", [])
         assigned = set()
         cmds = []
@@ -563,16 +568,30 @@ class FarmBrain:
                 cmds.append(fert_specialist_cmd)
                 continue
             inv = inventories[i] if i < len(inventories) else {}
+            is_field = zoning and i >= field_start
             best = None
             for rank, xy, action, cap, shareable in tasks:
                 if (not shareable) and xy in assigned:
                     continue
                 if not self._unit_capable(cap, inv):
                     continue
+                if is_field and _manhattan((4, 4), xy) <= FIELD_RADIUS:
+                    continue  # field hand skips inner-ring tasks
                 d = _manhattan(pos, xy)
                 key = (rank, d)
                 if best is None or key < best[0]:
                     best = (key, xy, action, shareable)
+            if best is None and is_field:
+                # Nothing on the outer ring: fall back to any task.
+                for rank, xy, action, cap, shareable in tasks:
+                    if (not shareable) and xy in assigned:
+                        continue
+                    if not self._unit_capable(cap, inv):
+                        continue
+                    d = _manhattan(pos, xy)
+                    key = (rank, d)
+                    if best is None or key < best[0]:
+                        best = (key, xy, action, shareable)
             if best is None:
                 cmds.append([PASS])
                 continue
