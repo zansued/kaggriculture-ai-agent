@@ -24,6 +24,9 @@ def trace(seed: int = 1, steps: int = 720, opponent: str = "starter", **brain_kw
     first_plant_day = {}
     prices_by_day = {}
     shed_by_day = {}
+    plants_by_day = {}   # day -> {crop: count}
+    empty_by_day = {}    # day -> count of empty unlocked tiles
+    weeds_by_day = {}    # day -> count of weed tiles
 
     def _agent(obs, _cfg=None):
         action = brain.decide(obs)
@@ -54,13 +57,23 @@ def trace(seed: int = 1, steps: int = 720, opponent: str = "starter", **brain_kw
             prev_day = day
         farm = obs["farms"][0]
         tiles = farm.get("tiles", [])
+        pc = plants_by_day.setdefault(day, {})
+        ec = empty_by_day.setdefault(day, 0)
+        wc = weeds_by_day.setdefault(day, 0)
         for y in range(len(tiles)):
             for x in range(len(tiles[y])):
                 t = tiles[y][x]
                 if isinstance(t, dict) and t.get("kind") == kr.KIND_PLANT:
                     c = t.get("crop")
+                    pc[c] = pc.get(c, 0) + 1
                     if c not in first_plant_day:
                         first_plant_day[c] = day
+                elif t is None:
+                    ec += 1
+                elif isinstance(t, dict) and t.get("kind") == kr.KIND_WEED:
+                    wc += 1
+        empty_by_day[day] = ec
+        weeds_by_day[day] = wc
 
     last = env.steps[-1]
     reward = last[0]["reward"] if last[0] else None
@@ -71,15 +84,17 @@ def trace(seed: int = 1, steps: int = 720, opponent: str = "starter", **brain_kw
     print(f"Total seed buys:   { {k: v for k, v in buys_seed.items() if v} }")
     print(f"First plant day:   {first_plant_day}")
 
-    print("\nDay | money | melon px | strawb px | wheat px | shed melon/strawb | sells:")
+    print("\nDay | money | melon px | empty | plants(M/S/T/W/C) | weeds | sells:")
     for d in sorted(daily):
         pr = prices_by_day.get(d, {})
-        sh = shed_by_day.get(d, {})
+        pc = plants_by_day.get(d, {})
+        ec = empty_by_day.get(d, 0)
+        wc = weeds_by_day.get(d, 0)
         sd = sells_daily.get(d, {})
+        plants = " ".join(f"{k[0]}:{pc.get(k,0)}" for k in ["MELON","STRAWBERRY","TOMATO","WHEAT","CARROT"])
         parts = [f"{c}:{sd[c]}" for c in sorted(sd)]
-        print(f"  {d:>2} | {daily[d]:>8.1f} | {pr.get('MELON','-'):>5} | {pr.get('STRAWBERRY','-'):>7} | "
-              f"{pr.get('WHEAT','-'):>5} | M:{sh.get('MELON','-')} S:{sh.get('STRAWBERRY','-')} "
-              f"| {' '.join(parts) if parts else '-'}")
+        print(f"  {d:>2} | {daily[d]:>8.1f} | {pr.get('MELON','-'):>5} | {ec:>3} | {plants} "
+              f"| {wc} | {' '.join(parts) if parts else '-'}")
 
 
 if __name__ == "__main__":
