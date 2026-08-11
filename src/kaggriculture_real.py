@@ -630,13 +630,19 @@ class FarmBrain:
         return False
 
     def _find_empty_structure(self, farm, structure_kind) -> tuple[int, int] | None:
+        """Empty structure of `structure_kind`, nearest the shed center."""
         tiles = farm.get("tiles", [])
+        best = None
+        best_d = 10 ** 9
         for y in range(len(tiles)):
             for x in range(len(tiles[y])):
                 t = tiles[y][x]
                 if isinstance(t, dict) and t.get("kind") == structure_kind and "animal" not in t:
-                    return (x, y)
-        return None
+                    d = abs(x - 4) + abs(y - 4)
+                    if d < best_d:
+                        best_d = d
+                        best = (x, y)
+        return best
 
     def _find_animal_tile(self, farm) -> tuple[int, int] | None:
         if self.animal is None:
@@ -676,13 +682,21 @@ class FarmBrain:
         return any(t is None for row in tiles for t in row)
 
     def _first_empty_tile(self, farm) -> tuple[int, int] | None:
-        """First fully empty unlocked tile (buildable)."""
+        """Empty unlocked tile nearest the shed center, NEVER on a shed access
+        tile (those must stay free so units can reach the shed)."""
         tiles = farm.get("tiles", [])
+        best = None
+        best_d = 10 ** 9
         for y in range(len(tiles)):
             for x in range(len(tiles[y])):
+                if (x, y) in SHED_TILES:
+                    continue
                 if tiles[y][x] is None:
-                    return (x, y)
-        return None
+                    d = abs(x - 4) + abs(y - 4)
+                    if d < best_d:
+                        best_d = d
+                        best = (x, y)
+        return best
 
     # ---- capability tags for multi-step choreography ------------------------ #
     # Each animal chore task carries a `cap` tag. The assignment loop only lets
