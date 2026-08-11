@@ -136,6 +136,7 @@ class FarmBrain:
         fert_strawberry: bool = False,
         animal: str | None = None,  # experimental; off by default (logistics > value)
         animal_day: int = 1,
+        melon_plant_gate: float | None = 240,  # stop planting melon when price < gate
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -160,6 +161,11 @@ class FarmBrain:
         # `animal_day`, fed wheat daily, harvested for product + free fertilizer.
         self.animal = animal
         self.animal_day = animal_day
+        # Melon has NO shop demand (only the town center drains ~1/day). Once the
+        # market is saturated (melon price below this gate) further melon planting
+        # just floods the market and crashes the price to $1 — switch to crops the
+        # town actually consumes (wheat/carrot/strawberry/tomato) instead.
+        self.melon_plant_gate = melon_plant_gate
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -512,8 +518,13 @@ class FarmBrain:
             # Must mature before season end (planting day counts toward growth).
             if day + cd["max_yield_day"] > SEASON_DAYS - 1:
                 continue
-            yield_est = _unfertilized_yield(crop)
+            # Melon gate: once the melon market is saturated (price below gate),
+            # stop planting melons — the glut crashes the price to $1 anyway.
             price = prices.get(crop, cd.get("base", 0))
+            if crop == "MELON" and self.melon_plant_gate is not None:
+                if price < self.melon_plant_gate:
+                    continue
+            yield_est = _unfertilized_yield(crop)
             profit = yield_est * price - cd["seed"]
             scored.append((profit, crop))
         scored.sort(reverse=True)
