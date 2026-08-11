@@ -137,6 +137,8 @@ class FarmBrain:
         animal: str | None = None,  # experimental; off by default (logistics > value)
         animal_day: int = 1,
         melon_plant_gate: float | None = 240,  # stop planting melon when price < gate
+        melon_focus: bool = False,  # while gate open, buy/plant ONLY melon
+        harvest_at_cap: bool = True,  # harvest one-time crops as soon as yield caps
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -166,6 +168,14 @@ class FarmBrain:
         # just floods the market and crashes the price to $1 — switch to crops the
         # town actually consumes (wheat/carrot/strawberry/tomato) instead.
         self.melon_plant_gate = melon_plant_gate
+        # Concentrate ALL seed money and planting on melons while the gate is
+        # open (melon is by far the best per-tile crop), then diversify once the
+        # market saturates. Avoids spreading early cash across all crops.
+        self.melon_focus = melon_focus
+        # One-time crops cap their yield before max_yield_day (melon caps at age
+        # 10 vs max_yield_day 12). Harvesting as soon as the yield is maxed frees
+        # the tile ~2 days earlier per cycle for replanting.
+        self.harvest_at_cap = harvest_at_cap
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -301,7 +311,13 @@ class FarmBrain:
                                 water.append((x, y))
                         elif cd:
                             age = day - int(tile.get("planted_day", day))
-                            if age >= cd["max_yield_day"] and tile.get("yield_units", 0) > 0:
+                            yield_units = tile.get("yield_units", 0)
+                            # One-time crops cap their yield before max_yield_day
+                            # (melon caps at age 10 vs max_yield_day 12). If
+                            # harvest_at_cap, reap as soon as yield is maxed to
+                            # free the tile ~2 days earlier per cycle.
+                            at_cap = yield_units >= cd["max_yield"]
+                            if (age >= cd["max_yield_day"] or (self.harvest_at_cap and at_cap)) and yield_units > 0:
                                 harvest.append((x, y))
                             elif needs_water:
                                 water.append((x, y))
@@ -512,6 +528,12 @@ class FarmBrain:
     # ---- 5. price-aware crop selection -------------------------------------- #
     def _preferred_crops(self, obs, farm, day) -> list[str]:
         prices = obs.get("market", {}).get("prices", {})
+        melon_price = prices.get("MELON", CROPS["MELON"].get("base", 250))
+        # Melon focus: while the gate is open and melon can still mature, put ALL
+        # seed money and planting into melon (best per-tile crop by far).
+        if self.melon_focus and self.melon_plant_gate is not None and melon_price >= self.melon_plant_gate:
+            if day + CROPS["MELON"]["max_yield_day"] <= SEASON_DAYS - 1:
+                return ["MELON"]
         scored = []
         for crop in self.crops:
             cd = CROPS[crop]

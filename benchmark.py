@@ -26,8 +26,9 @@ import kaggriculture_real as kr  # noqa: E402
 
 # Named FarmBrain variants. "default" is the committed default config.
 VARIANT_CONFIGS: dict[str, dict] = {
-    "default": {},  # now includes melon_plant_gate=240 by default
+    "default": {},  # includes melon_plant_gate=240, harvest_at_cap=True by default
     "nogate": {"melon_plant_gate": None},
+    "noharvcap": {"harvest_at_cap": False},
     "gate240_hands3": {"melon_plant_gate": 240, "max_hands": 3},
     # Land expansion — buy NE quadrant on a chosen day.
     "land10": {"buy_land_day": 10},
@@ -60,6 +61,14 @@ VARIANT_CONFIGS: dict[str, dict] = {
     "wcm": {"crops": ["WHEAT", "CARROT", "MELON"]},
     "premium": {"crops": ["MELON", "STRAWBERRY"]},
     "all_fast": {"crops": ["WHEAT", "CARROT"]},
+    # Melon focus: while gate open, concentrate all seeds/planting on melon.
+    "focus": {"melon_focus": True},
+    "focus_hands3": {"melon_focus": True, "max_hands": 3},
+    # Harvest one-time crops as soon as yield caps (melon at age 10, not 12).
+    "harvcap": {"harvest_at_cap": True},
+    "harvcap_g220": {"harvest_at_cap": True, "melon_plant_gate": 220},
+    "harvcap_g230": {"harvest_at_cap": True, "melon_plant_gate": 230},
+    "harvcap_g250": {"harvest_at_cap": True, "melon_plant_gate": 250},
     # Melon plant gate: stop planting melon when its price < gate.
     "gate180": {"melon_plant_gate": 180},
     "gate200": {"melon_plant_gate": 200},
