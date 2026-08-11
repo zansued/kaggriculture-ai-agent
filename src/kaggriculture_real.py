@@ -279,11 +279,18 @@ class FarmBrain:
                 # market phase's buys are processed).
                 money += qty * prices.get(item, 0)
 
-        # Buy land (NE quadrant) on the chosen day if affordable.
+        # Buy land quadrants after `buy_land_day`, staggered, keeping a cash
+        # buffer so the animal/feed budget is never starved. The engine buys
+        # quadrants in order (NE $1000, SW $2000, SE $4000). Cap at NE+SW (the
+        # top agent's footprint); SE is too expensive and spreads us too thin.
         if self.buy_land_day is not None and day >= self.buy_land_day:
-            if "NE" not in farm.get("unlocked_quadrants", []) and money >= 1000:
-                ops.append([BUY_LAND])
-                money -= 1000
+            n_unlocked = len(farm.get("unlocked_quadrants", []))  # NW always counts
+            if n_unlocked < 3:  # at most NE + SW
+                next_cost = (1000, 2000, 4000)[n_unlocked - 1]
+                if day >= self.buy_land_day + (n_unlocked - 1) * 3:
+                    if money >= next_cost + 400:  # keep ~$400 float for feed
+                        ops.append([BUY_LAND])
+                        money -= next_cost
 
         # Full livestock economy: buy cows+sheep per the plan, keep wheat feed.
         # The market queue is capped at MAX_MARKET_ORDERS and processed in order,
@@ -419,10 +426,15 @@ class FarmBrain:
                         cd = CROPS.get(crop)
                         needs_water = not tile.get("watered_today", False)
                         if cd and cd["ongoing"]:
+                            # Ongoing crops MUST be watered every day to survive
+                            # (2 unwatered days -> weed) AND harvested when they
+                            # hold yield. The old if/elif meant a plant with
+                            # yield>0 only got harvested and never watered, so
+                            # it withered and strawberry production collapsed.
+                            if needs_water:
+                                water.append((x, y))
                             if tile.get("yield_units", 0) > 0:
                                 harvest.append((x, y))
-                            elif needs_water:
-                                water.append((x, y))
                         elif cd:
                             age = day - int(tile.get("planted_day", day))
                             yield_units = tile.get("yield_units", 0)
