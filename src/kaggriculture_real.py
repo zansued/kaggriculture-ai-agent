@@ -540,7 +540,10 @@ class FarmBrain:
                 continue
             crop = _plantable_crop()
             if crop:
-                tasks.append((3, xy, [PLANT, crop], None, False))
+                # Plant at rank 2.5 (after weeding) so freed tiles actually get
+                # re-cropped instead of sitting idle while hands chase watering/
+                # harvesting/animal chores all day.
+                tasks.append((2.5, xy, [PLANT, crop], None, False))
 
         # Assign each unit the nearest unassigned task it is CAPABLE of (lower
         # rank wins). The farmer (unit 0) is processed first and animal chores
