@@ -231,13 +231,14 @@ class FarmBrain:
         # the price recovers). Always dump in the final days of the season so
         # no value is left sitting in the shed.
         prices = obs.get("market", {}).get("prices", {})
-        # Livestock feed reserve: never sell wheat that animals need today.
+        # Livestock feed reserve: never sell wheat that animals need. Match the
+        # buy-side 2-day buffer so wheat doesn't oscillate buy-then-sell.
         feed_reserve = 0
         if self.livestock:
             invs = private.get("inventories", [])
             pending = sum(shed.get(a, 0) + sum(inv.get(a, 0) for inv in invs)
                           for a, _ in self.animal_plan)
-            feed_reserve = self._total_animals(farm) + pending
+            feed_reserve = (self._total_animals(farm) + pending) * 2
         for item, amount in shed.items():
             qty = int(amount)
             if qty <= 0:
@@ -256,18 +257,10 @@ class FarmBrain:
                 qty = min(qty, self.premium_sell_per_turn)
             if qty > 0:
                 ops.append([SELL, item, qty])
-
-        # HIRE hands at the start of each day. Cheap: first two cost $1 each.
-        if hour == 0:
-            n_hired = int(farm.get("hires_today", 0))
-            want = max(0, self.max_hands - len(farm.get("hands", [])))
-            for _ in range(want):
-                cost = _fib(n_hired)
-                if money < cost:
-                    break
-                ops.append([HIRE])
-                money -= cost
-                n_hired += 1
+                # Track expected cash from this sale so buy decisions below use
+                # a realistic budget (the engine credits sell proceeds before the
+                # market phase's buys are processed).
+                money += qty * prices.get(item, 0)
 
         # Buy land (NE quadrant) on the chosen day if affordable.
         if self.buy_land_day is not None and day >= self.buy_land_day:
@@ -276,37 +269,62 @@ class FarmBrain:
                 money -= 1000
 
         # Full livestock economy: buy cows+sheep per the plan, keep wheat feed.
-        # Placed BEFORE seeds so the market-order cap never starves the animals.
+        # The market queue is capped at MAX_MARKET_ORDERS and processed in order,
+        # so ordering here is critical: feed FIRST (animals die without it), then
+        # hands (cheap, ramp the labor force), then animals (hour 0 only), and
+        # seeds fill whatever slots remain.
         if self.livestock:
-            size = len(farm.get("tiles", []))
             invs = private.get("inventories", [])
-            # 1) Reserve feed wheat for every animal (placed + pending placement
-            #    in shed/inventory) BEFORE buying anything else — animals escape
-            #    after 2 unfed days, so feed supply is the #1 priority.
             n_animals = self._total_animals(farm)
             n_pending = sum(
                 shed.get(a, 0) + sum(inv.get(a, 0) for inv in invs)
                 for a, _ in self.animal_plan
             )
-            feed_need = n_animals + n_pending
+            # 1) FEED: top up to a 2-day buffer every turn so the herd never
+            #    starves while other orders churn. Sells reserve the same buffer
+            #    (see feed_reserve above) so there is no buy/sell oscillation.
+            feed_need = (n_animals + n_pending) * 2
             have_wheat = shed.get("WHEAT", 0) + sum(inv.get("WHEAT", 0) for inv in invs)
             if feed_need > 0 and have_wheat < feed_need and money >= 25:
-                want = min(feed_need - have_wheat, 4)
+                want = min(feed_need - have_wheat, 6)
                 ops.append([BUY_PRODUCT, "WHEAT", want])
                 money -= 25 * want
-            # 2) Buy animals only if the feed reserve is covered and we keep a
-            #    cash floor for future feed. Allow a small pipeline of animals
-            #    waiting to be placed so placement isn't the bottleneck.
-            for animal, target in self.animal_plan:
-                a = ANIMALS[animal]
-                placed = self._placed_count(farm, animal)
-                in_shed = shed.get(animal, 0)
-                in_inv = sum(inv.get(animal, 0) for inv in invs)
-                pipeline = in_shed + in_inv
-                if placed < target and pipeline < 2 and self._room_for_structure(farm, size, a["structure"]):
-                    if money - a["cost"] >= 200 and money >= a["cost"]:
+            # 2) HIRE: spread across the day (max 2/turn) so hands ramp up
+            #    without consuming the whole hour-0 market budget.
+            n_hands = len(farm.get("hands", []))
+            if n_hands < self.max_hands:
+                n_hired = int(farm.get("hires_today", 0))
+                for _ in range(min(2, self.max_hands - n_hands)):
+                    cost = _fib(n_hired)
+                    if money < cost:
+                        break
+                    ops.append([HIRE])
+                    money -= cost
+                    n_hired += 1
+            # 3) ANIMALS: once per day, only while we still need them AND they
+            #    can actually be placed soon AND the herd's feed budget stays
+            #    covered. This throttles the early game — buy a few animals on
+            #    day 0, then ramp as fertilizer/product income arrives.
+            if hour == 0:
+                for animal, target in self.animal_plan:
+                    a = ANIMALS[animal]
+                    placed = self._placed_count(farm, animal)
+                    in_shed = shed.get(animal, 0)
+                    in_inv = sum(inv.get(animal, 0) for inv in invs)
+                    owned = placed + in_shed + in_inv
+                    if owned >= target:
+                        continue
+                    placeable = (
+                        self._find_empty_structure(farm, a["structure"]) is not None
+                        or self._first_empty_tile(farm) is not None
+                    )
+                    # 2 days of feed for the herd including this new animal.
+                    feed_cash = (n_animals + n_pending + 1) * 2 * 25
+                    if placeable and money >= a["cost"] + feed_cash:
                         ops.append([BUY_ANIMAL, animal, 1])
                         money -= a["cost"]
+                        n_animals += 1
+                        n_pending += 1
                         if len(ops) >= MAX_MARKET_ORDERS:
                             return ops[:MAX_MARKET_ORDERS]
 
@@ -442,35 +460,44 @@ class FarmBrain:
         # fertilizer application at rank 1.5 (after watering, before dig).
         tasks = list(animal_tasks)
         for xy in water:
-            tasks.append((0, xy, [WATER]))
+            tasks.append((0, xy, [WATER], None, False))
         for xy in harvest:
-            tasks.append((1, xy, [HARVEST]))
+            tasks.append((1, xy, [HARVEST], None, False))
         if fert_task:
-            tasks.append((1.5, fert_task[0], fert_task[1]))
+            tasks.append((1.5, fert_task[0], fert_task[1], fert_task[2], False))
         for xy in weed:
-            tasks.append((2, xy, [DIG]))
+            tasks.append((2, xy, [DIG], None, False))
         for xy in plant:
             crop = _plantable_crop()
             if crop:
-                tasks.append((3, xy, [PLANT, crop]))
+                tasks.append((3, xy, [PLANT, crop], None, False))
 
-        # Assign each unit the nearest unassigned task (lower rank wins).
+        # Assign each unit the nearest unassigned task it is CAPABLE of (lower
+        # rank wins). The farmer (unit 0) is processed first and animal chores
+        # have the highest priority, so it naturally leads the logistics chain.
+        # `shareable` tasks (shed restocking) may be taken by several units at
+        # once — they are never added to the assigned set.
+        inventories = private.get("inventories", [])
         assigned = set()
         cmds = []
-        for pos in positions:
+        for i, pos in enumerate(positions):
+            inv = inventories[i] if i < len(inventories) else {}
             best = None
-            for rank, xy, action in tasks:
-                if xy in assigned:
+            for rank, xy, action, cap, shareable in tasks:
+                if (not shareable) and xy in assigned:
+                    continue
+                if not self._unit_capable(cap, inv):
                     continue
                 d = _manhattan(pos, xy)
                 key = (rank, d)
                 if best is None or key < best[0]:
-                    best = (key, xy, action)
+                    best = (key, xy, action, shareable)
             if best is None:
                 cmds.append([PASS])
                 continue
-            (_, _), xy, action = best
-            assigned.add(xy)
+            (_, _), xy, action, shareable = best
+            if not shareable:
+                assigned.add(xy)
             if pos == xy:
                 cmds.append(action)
             else:
@@ -515,10 +542,10 @@ class FarmBrain:
         # Does any unit already hold fertilizer in its inventory?
         for inv in private.get("inventories", []):
             if inv.get("FERTILIZER", 0) > 0:
-                return target, [FERTILIZE]
+                return target, [FERTILIZE], "FERT"
         # Otherwise the fertilizer sits in the shed; pick it up first.
         if private.get("shed", {}).get("FERTILIZER", 0) > 0:
-            return _shed_tile(farm), [PICKUP, "FERTILIZER", 1]
+            return _shed_tile(farm), [PICKUP, "FERTILIZER", 1], "!FERT"
         return None
 
     # ---- 4. livestock -------------------------------------------------------- #
@@ -579,8 +606,45 @@ class FarmBrain:
         tiles = farm.get("tiles", [])
         return any(t is None for row in tiles for t in row)
 
+    def _first_empty_tile(self, farm) -> tuple[int, int] | None:
+        """First fully empty unlocked tile (buildable)."""
+        tiles = farm.get("tiles", [])
+        for y in range(len(tiles)):
+            for x in range(len(tiles[y])):
+                if tiles[y][x] is None:
+                    return (x, y)
+        return None
+
+    # ---- capability tags for multi-step choreography ------------------------ #
+    # Each animal chore task carries a `cap` tag. The assignment loop only lets
+    # a unit take a task it is capable of, so the PICKUP->FEED and PICKUP->PLACE
+    # chains stay on the SAME unit across turns (a unit that carries wheat is the
+    # only one that may feed; a unit that carries a cow is the only one that may
+    # place it). Without this, the nearest-task coordinator hands the second half
+    # of a chain to a different unit and the animal gets stuck in a deadlock.
+    @staticmethod
+    def _unit_capable(cap, inv) -> bool:
+        if cap is None:
+            return True
+        if cap == "WHEAT":          # must be carrying wheat (can feed)
+            return inv.get("WHEAT", 0) > 0
+        if cap == "!WHEAT":         # must NOT be carrying wheat or any animal
+            return inv.get("WHEAT", 0) <= 0 and not any(a in inv for a in ANIMALS)
+        if cap == "!ANIMAL":        # must not be carrying any animal
+            return not any(a in inv for a in ANIMALS)
+        if cap == "FERT":           # must be carrying fertilizer (can fertilize)
+            return inv.get("FERTILIZER", 0) > 0
+        if cap == "!FERT":          # must not be carrying fertilizer
+            return inv.get("FERTILIZER", 0) <= 0
+        return inv.get(cap, 0) > 0  # must be carrying this specific animal
+
     def _plan_animal_tasks(self, obs, farm, private, day, size):
-        """Livestock chores, ranked just above watering so animals never escape."""
+        """Livestock chores, ranked just above watering so animals never escape.
+
+        Every task is (rank, xy, action, cap): the assigned unit must satisfy
+        `cap` (see `_unit_capable`). This keeps feed/placement chains on the
+        same carrier across turns instead of deadlocking animals in the shed.
+        """
         if not self.livestock:
             return []
         shed = private.get("shed", {})
@@ -588,23 +652,40 @@ class FarmBrain:
         tiles = farm.get("tiles", [])
 
         # ---- (A) chores for already-placed animals --------------------------
-        # Feed needs a unit carrying wheat: emit PICKUP WHEAT at the shed first,
-        # then FEED next turn when a unit carries it.
+        unfed = []
         for x, y, t in self._all_animals(farm):
             animal = t["animal"]
             if not t.get("fed_today", False):
-                if self._any_carry(private, "WHEAT"):
-                    tasks.append((-1, (x, y), [FEED]))
-                else:
-                    tasks.append((-1, _shed_tile(farm), [PICKUP, "WHEAT", 1]))
+                unfed.append((x, y))
             if t.get("fertilizer_available", False):
-                tasks.append((-1, (x, y), [COLLECT_FERTILIZER]))
+                tasks.append((-1, (x, y), [COLLECT_FERTILIZER], None, False))
             if t.get("yield_units", 0) > 0:
-                tasks.append((-1, (x, y), [HARVEST]))
+                tasks.append((-1, (x, y), [HARVEST], None, False))
             if not t.get("cared_today", False):
-                tasks.append((-1, (x, y), [CARE]))
+                tasks.append((-1, (x, y), [CARE], None, False))
 
-        # ---- (B) place unplaced animals: build structure, then place --------
+        # Feed: units already carrying wheat may FEED; units NOT carrying
+        # wheat/animals restock from the shed. Both are emitted simultaneously
+        # so feeding never stalls while a single carrier walks a long way.
+        # Restock tasks are marked `shareable=True` so several units may target
+        # the same shed tile in the same turn (each picking up a small batch).
+        if unfed:
+            inventories = private.get("inventories", [])
+            n_unfed = len(unfed)
+            n_carry_wheat = sum(1 for inv in inventories if inv.get("WHEAT", 0) > 0)
+            n_free = sum(
+                1 for inv in inventories
+                if inv.get("WHEAT", 0) <= 0 and not any(a in inv for a in ANIMALS)
+            )
+            for xy in unfed:
+                tasks.append((-1, xy, [FEED], "WHEAT", False))
+            if shed.get("WHEAT", 0) > 0:
+                need = max(0, n_unfed - n_carry_wheat)
+                for _ in range(min(n_free, need, 3)):
+                    batch = min(shed.get("WHEAT", 0), max(1, n_unfed), 2)
+                    tasks.append((-1, _shed_tile(farm), [PICKUP, "WHEAT", batch], "!WHEAT", True))
+
+        # ---- (B) place/build unplaced animals --------------------------------
         for animal, target in self.animal_plan:
             a = ANIMALS[animal]
             placed = self._placed_count(farm, animal)
@@ -614,25 +695,19 @@ class FarmBrain:
             in_inv = sum(inv.get(animal, 0) for inv in private.get("inventories", []))
             structure_kind = a["structure"]
             empty_struct = self._find_empty_structure(farm, structure_kind)
+            build = BUILD_COOP if structure_kind == KIND_COOP else BUILD_PASTURE
             if empty_struct is not None:
                 if in_inv > 0:
-                    tasks.append((-1, empty_struct, [PLACE, animal, 1]))
+                    tasks.append((-1, empty_struct, [PLACE, animal, 1], animal, False))
                 elif in_shed > 0:
-                    tasks.append((-1, _shed_tile(farm), [PICKUP, animal, 1]))
-            else:
-                # Build enough structures for the animals currently available
-                # (in shed or carried) plus one incoming from the market.
-                available = in_shed + in_inv + (1 if placed + in_shed + in_inv < target else 0)
-                if available <= 0:
-                    continue
-                build = BUILD_COOP if structure_kind == KIND_COOP else BUILD_PASTURE
-                for y in range(size):
-                    for x in range(size):
-                        if tiles[y][x] is None:
-                            tasks.append((-1, (x, y), [build]))
-                            available -= 1
-                            if available <= 0:
-                                return tasks
+                    tasks.append((-1, _shed_tile(farm), [PICKUP, animal, 1], "!ANIMAL", False))
+            elif in_shed + in_inv > 0:
+                # A structure is needed and an animal is ready: build it now so
+                # the pickup/place chain doesn't stall on missing structures.
+                tile = self._first_empty_tile(farm)
+                if tile is not None:
+                    tasks.append((-1, tile, [build], None, False))
+
         return tasks
 
     # ---- 4. premium production cap ------------------------------------------- #
