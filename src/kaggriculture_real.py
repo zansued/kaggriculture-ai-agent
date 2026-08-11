@@ -295,8 +295,9 @@ class FarmBrain:
         # Full livestock economy: buy cows+sheep per the plan, keep wheat feed.
         # The market queue is capped at MAX_MARKET_ORDERS and processed in order,
         # so ordering here is critical: feed FIRST (animals die without it), then
-        # hands (cheap, ramp the labor force), then animals (hour 0 only), and
-        # seeds fill whatever slots remain.
+        # ANIMALS at hour 0 (the core engine — buy aggressively early so they
+        # start producing fertilizer ASAP), then hands, then seeds fill what's
+        # left. On day 0 this matches the reference agent's 4-animal opening.
         if self.livestock:
             invs = private.get("inventories", [])
             n_animals = self._total_animals(farm)
@@ -313,22 +314,9 @@ class FarmBrain:
                 want = min(feed_need - have_wheat, 6)
                 ops.append([BUY_PRODUCT, "WHEAT", want])
                 money -= 25 * want
-            # 2) HIRE: spread across the day (max 2/turn) so hands ramp up
-            #    without consuming the whole hour-0 market budget.
-            n_hands = len(farm.get("hands", []))
-            if n_hands < self.max_hands:
-                n_hired = int(farm.get("hires_today", 0))
-                for _ in range(min(2, self.max_hands - n_hands)):
-                    cost = _fib(n_hired)
-                    if money < cost:
-                        break
-                    ops.append([HIRE])
-                    money -= cost
-                    n_hired += 1
-            # 3) ANIMALS: once per day, only while we still need them AND they
-            #    can actually be placed soon AND the herd's feed budget stays
-            #    covered. This throttles the early game — buy a few animals on
-            #    day 0, then ramp as fertilizer/product income arrives.
+            # 2) ANIMALS: at hour 0 only, one per type (COW then SHEEP) while
+            #    the plan/placeability/feed-budget allow. Placed BEFORE hiring
+            #    so the market-order cap never starves the animal buys.
             if hour == 0:
                 for animal, target in self.animal_plan:
                     a = ANIMALS[animal]
@@ -351,6 +339,18 @@ class FarmBrain:
                         n_pending += 1
                         if len(ops) >= MAX_MARKET_ORDERS:
                             return ops[:MAX_MARKET_ORDERS]
+            # 3) HIRE: spread across the day (max 2/turn) so hands ramp up
+            #    without consuming the whole hour-0 market budget.
+            n_hands = len(farm.get("hands", []))
+            if n_hands < self.max_hands:
+                n_hired = int(farm.get("hires_today", 0))
+                for _ in range(min(2, self.max_hands - n_hands)):
+                    cost = _fib(n_hired)
+                    if money < cost:
+                        break
+                    ops.append([HIRE])
+                    money -= cost
+                    n_hired += 1
 
         # Buy seeds for the most profitable affordable crop(s). Skip premium
         # crops when we already have enough active plants (production cap).
