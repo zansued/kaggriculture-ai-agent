@@ -556,23 +556,24 @@ class FarmBrain:
                 tasks.append((2.5, xy, [PLANT, crop], None, False))
 
         # Assign each unit the nearest unassigned task it is CAPABLE of (lower
-        # rank wins). The farmer (unit 0) is processed first and animal chores
+        # key wins). The farmer (unit 0) is processed first and animal chores
         # have the highest priority, so it naturally leads the logistics chain.
         # `shareable` tasks (shed restocking) may be taken by several units at
         # once — they are never added to the assigned set. The first hand (i=1)
         # is the fertilizer specialist when a chain is active.
         #
-        # SPATIAL ZONING: the last 3 units are "field hands" that only work
-        # tasks on the outer ring (distance > FIELD_RADIUS from the shed), so
-        # crops on expanded land actually get watered/harvested. Without this,
-        # every unit clusters on the near-shed animal chores and distant
-        # strawberry is never tended (st_watered=0, plants wither). Field hands
-        # relax to any task when the outer ring is idle (e.g. pre-land).
-        FIELD_RADIUS = 3
-        # Only zone when expanded land exists; pre-land all units work the whole
-        # board (zoning starves the animal chore pool otherwise).
+        # ZONE-BASED PRIORITY (4 levels, lower key wins):
+        #   0 = URGENT  (at-risk feed -2 / at-risk water -0.5)  -> ANY unit
+        #   1 = CRITICAL (feed/collect/care/harvest/place/build, rank<0) -> any unit
+        #   2 = own-zone normal crops (water/harvest/plant/dig, rank>=0)
+        #   3 = out-of-zone normal crops
+        # So survival tasks are always covered first by any unit, and the LAST
+        # few hands ("field hands") stick to their quadrant's crops the rest of
+        # the time. This keeps expanded-land strawberry watered without letting
+        # animals starve (the failure mode of a pure static split).
         zoning = len(farm.get("unlocked_quadrants", [])) > 1
-        field_start = max(1, len(positions) - 3)
+        n_field = max(0, min(4, len(positions) - 4)) if zoning else 0
+        field_start = len(positions) - n_field
         inventories = private.get("inventories", [])
         assigned = set()
         cmds = []
@@ -581,34 +582,34 @@ class FarmBrain:
                 cmds.append(fert_specialist_cmd)
                 continue
             inv = inventories[i] if i < len(inventories) else {}
-            is_field = zoning and i >= field_start
+            is_field = i >= field_start
+            # Field hands alternate quadrants (even->NE, odd->SW) so the outer
+            # crops in both bought quadrants get covered.
+            field_zone = "NE" if (i - field_start) % 2 == 0 else "SW"
             best = None
             for rank, xy, action, cap, shareable in tasks:
                 if (not shareable) and xy in assigned:
                     continue
                 if not self._unit_capable(cap, inv):
                     continue
-                if is_field and _manhattan((4, 4), xy) <= FIELD_RADIUS:
-                    continue  # field hand skips inner-ring tasks
+                if rank <= -2 or rank == -0.5:
+                    prio = 0  # urgent: at-risk animal/plant survival
+                elif rank < 0:
+                    prio = 1  # critical animal chore
+                elif is_field and self._zone_of(*xy) == field_zone:
+                    prio = 2  # own quadrant crop
+                elif is_field:
+                    prio = 3  # other quadrant crop (or core)
+                else:
+                    prio = 2  # core hand: in-zone = any normal crop
                 d = _manhattan(pos, xy)
-                key = (rank, d)
+                key = (prio, rank, d)
                 if best is None or key < best[0]:
                     best = (key, xy, action, shareable)
-            if best is None and is_field:
-                # Nothing on the outer ring: fall back to any task.
-                for rank, xy, action, cap, shareable in tasks:
-                    if (not shareable) and xy in assigned:
-                        continue
-                    if not self._unit_capable(cap, inv):
-                        continue
-                    d = _manhattan(pos, xy)
-                    key = (rank, d)
-                    if best is None or key < best[0]:
-                        best = (key, xy, action, shareable)
             if best is None:
                 cmds.append([PASS])
                 continue
-            (_, _), xy, action, shareable = best
+            (_, _, _), xy, action, shareable = best
             if not shareable:
                 assigned.add(xy)
             if pos == xy:
@@ -748,6 +749,17 @@ class FarmBrain:
                         best_d = d
                         best = (x, y)
         return best
+
+    @staticmethod
+    def _zone_of(x: int, y: int) -> str:
+        """Spatial zone of a tile: core (near the shed), NE, SW, else far."""
+        if abs(x - 4) + abs(y - 4) <= 3:
+            return "core"
+        if x >= 5 and y < 5:
+            return "NE"
+        if x < 5 and y >= 5:
+            return "SW"
+        return "far"
 
     # ---- capability tags for multi-step choreography ------------------------ #
     # Each animal chore task carries a `cap` tag. The assignment loop only lets
