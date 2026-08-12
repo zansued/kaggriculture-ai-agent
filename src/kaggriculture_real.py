@@ -256,76 +256,13 @@ class FarmBrain:
         shed = private.get("shed", {})
         money = float(farm.get("money", 0.0))
 
-        # Sell everything in the shed — cash now beats sitting inventory.
-        # Premium goods (melon/strawberry) crash the shared market if we dump
-        # too many at once, so cap how many of each we sell per turn. Also hold
-        # them when the price is below a floor (the town drains the market and
-        # the price recovers). Always dump in the final days of the season so
-        # no value is left sitting in the shed.
+        # Sell everything in the shed with market-timing (price/shop/opponent
+        # aware). Cash now beats sitting inventory; the timing logic decides how
+        # fast premium goods should be dribbled vs dumped.
         prices = obs.get("market", {}).get("prices", {})
-        # Opponent's visible production pressure, used to front-run their floods.
-        opp_supply = self._opponent_supply(obs) if self.livestock else {}
-        # Town-shop consumption per product (drives prices up when shops unlock).
-        shop_demand = self._shop_demand(obs)
-        # Livestock feed reserve: never sell wheat that animals need. Match the
-        # buy-side 2-day buffer so wheat doesn't oscillate buy-then-sell.
-        feed_reserve = 0
-        if self.livestock:
-            invs = private.get("inventories", [])
-            pending = sum(shed.get(a, 0) + sum(inv.get(a, 0) for inv in invs)
-                          for a, _ in self.animal_plan)
-            feed_reserve = (self._total_animals(farm) + pending) * 2
-        for item, amount in shed.items():
-            qty = int(amount)
-            if qty <= 0:
-                continue
-            if item in ANIMALS:
-                # Never sell animals — they're bought for placement, not resale.
-                continue
-            if self.livestock and item == "WHEAT":
-                qty = max(0, qty - feed_reserve)
-                if qty <= 0:
-                    continue
-            if self.livestock and self.fert_strawberry and item == "FERTILIZER":
-                # Reserve free animal fertilizer for strawberry only while a
-                # fertilized strawberry unit is worth more than selling the
-                # fertilizer. FERTILIZE doubles one production (+1 strawberry)
-                # but costs 1 fertilizer; if the fertilizer price is higher,
-                # selling it is the better use.
-                st_price = prices.get("STRAWBERRY", 0)
-                fert_price = prices.get("FERTILIZER", 100)
-                reserve = self._strawberry_fert_reserve(farm) if st_price >= fert_price else 0
-                qty = max(0, qty - reserve)
-                if qty <= 0:
-                    continue
-            if item in self.PREMIUM:
-                price = prices.get(item, 0)
-                base = BASE_PRICES.get(item, 100)
-                opp = opp_supply.get(item, 0) if opp_supply else 0
-                shop = shop_demand.get(item, 0)
-                if day >= SEASON_DAYS - 2:
-                    pass  # final days: dump everything, don't cap
-                elif opp >= 4 and shop == 0:
-                    # Opponent floods this product and no shop buys it: don't add
-                    # to the glut — the price is on its way to the floor. Dribble
-                    # and let the town center absorb it.
-                    qty = min(qty, 2)
-                elif shop >= 2 or price >= base * 1.5:
-                    # Shop demand is strong OR the market is hungry: the town
-                    # drains this product — sell as fast as the queue allows.
-                    qty = min(qty, 10)
-                elif price >= base * 1.1:
-                    qty = min(qty, 6)
-                elif self.premium_sell_floor is not None and price < self.premium_sell_floor:
-                    continue  # hold; price too low, town will drain and recover
-                else:
-                    qty = min(qty, self.premium_sell_per_turn)  # dribble, don't flood
-            if qty > 0:
-                ops.append([SELL, item, qty])
-                # Track expected cash from this sale so buy decisions below use
-                # a realistic budget (the engine credits sell proceeds before the
-                # market phase's buys are processed).
-                money += qty * prices.get(item, 0)
+        sell_ops, sell_proceeds = self._plan_sells(obs, farm, private, day, hour, prices)
+        ops.extend(sell_ops)
+        money += sell_proceeds
 
         # Buy land quadrants after `buy_land_day`, staggered, keeping a cash
         # buffer so the animal/feed budget is never starved. The engine buys
@@ -454,6 +391,68 @@ class FarmBrain:
                     money -= 25 * (3 - have_wheat)
 
         return ops[:MAX_MARKET_ORDERS]
+
+    def _plan_sells(self, obs: dict, farm: dict, private: dict, day: int, hour: int, prices: dict,
+                    reserve_feed: bool = True) -> tuple:
+        """Market-timed SELL orders from the shed. Returns (sell_ops, proceeds).
+
+        Premium products (base > 100) are sold at a rate that scales with
+        demand: strong shop demand / hungry market -> sell fast; weak price ->
+        dribble; opponent floods a product and no shop buys it -> hold. Staple
+        products (wheat/fertilizer/carrot) sell freely, reserving wheat feed
+        and strawberry fertilizer as needed. Reusable standalone so a hybrid
+        agent can combine trace production with this selling overlay.
+        """
+        shed = private.get("shed", {})
+        ops: list = []
+        proceeds = 0.0
+        opp_supply = self._opponent_supply(obs) if self.livestock else {}
+        shop_demand = self._shop_demand(obs)
+        feed_reserve = 0
+        if reserve_feed and self.livestock:
+            invs = private.get("inventories", [])
+            pending = sum(shed.get(a, 0) + sum(inv.get(a, 0) for inv in invs)
+                          for a, _ in self.animal_plan)
+            feed_reserve = (self._total_animals(farm) + pending) * 2
+        for item, amount in shed.items():
+            qty = int(amount)
+            if qty <= 0:
+                continue
+            if item in ANIMALS:
+                # Never sell animals — they're bought for placement, not resale.
+                continue
+            if reserve_feed and self.livestock and item == "WHEAT":
+                qty = max(0, qty - feed_reserve)
+                if qty <= 0:
+                    continue
+            if reserve_feed and self.livestock and self.fert_strawberry and item == "FERTILIZER":
+                st_price = prices.get("STRAWBERRY", 0)
+                fert_price = prices.get("FERTILIZER", 100)
+                reserve = self._strawberry_fert_reserve(farm) if st_price >= fert_price else 0
+                qty = max(0, qty - reserve)
+                if qty <= 0:
+                    continue
+            if item in self.PREMIUM:
+                price = prices.get(item, 0)
+                base = BASE_PRICES.get(item, 100)
+                opp = opp_supply.get(item, 0) if opp_supply else 0
+                shop = shop_demand.get(item, 0)
+                if day >= SEASON_DAYS - 2:
+                    pass  # final days: dump everything, don't cap
+                elif opp >= 4 and shop == 0:
+                    qty = min(qty, 2)  # opponent floods, no shop buys -> hold
+                elif shop >= 2 or price >= base * 1.5:
+                    qty = min(qty, 10)  # strong demand -> sell fast
+                elif price >= base * 1.1:
+                    qty = min(qty, 6)
+                elif self.premium_sell_floor is not None and price < self.premium_sell_floor:
+                    continue  # hold; price too low, town will drain and recover
+                else:
+                    qty = min(qty, self.premium_sell_per_turn)  # dribble
+            if qty > 0:
+                ops.append([SELL, item, qty])
+                proceeds += qty * prices.get(item, 0)
+        return ops, proceeds
 
     # ---- 2. unit coordination ---------------------------------------------- #
     def _plan_units(self, obs, farm, private, day, positions):
