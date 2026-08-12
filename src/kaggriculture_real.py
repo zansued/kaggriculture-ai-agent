@@ -211,8 +211,11 @@ class FarmBrain:
         # so prices hold. Needs many hands for daily feed/collect chores.
         self.livestock = livestock
         if livestock and animal_plan is None:
-            # 8 cows + 6 sheep (purearch scale) with 8 hands benchmarked best.
-            animal_plan = [("COW", 8), ("SHEEP", 6)]
+            # 9 cows + 4 sheep: wool has no shop demand (only Yarn Store) and
+            # crashes hard (above_target 3.2 sq), so fewer sheep beats the
+            # purearch's 8+6. Top-2 ladder agent (kawashigi) uses 10 cows + 4;
+            # 9+4 benchmarks best on our 25-tile reactive farm.
+            animal_plan = [("COW", 9), ("SHEEP", 4)]
         self.animal_plan = animal_plan or []
         if livestock:
             self.max_hands = max(self.max_hands, livestock_hands)
