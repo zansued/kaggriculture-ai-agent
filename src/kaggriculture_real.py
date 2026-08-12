@@ -269,10 +269,14 @@ class FarmBrain:
                 if qty <= 0:
                     continue
             if self.livestock and self.fert_strawberry and item == "FERTILIZER":
-                # Reserve free animal fertilizer for strawberry fertilization —
-                # using it doubles the next strawberry production (~$110 value)
-                # which beats selling it (~$95).
-                reserve = self._strawberry_fert_reserve(farm)
+                # Reserve free animal fertilizer for strawberry only while a
+                # fertilized strawberry unit is worth more than selling the
+                # fertilizer. FERTILIZE doubles one production (+1 strawberry)
+                # but costs 1 fertilizer; if the fertilizer price is higher,
+                # selling it is the better use.
+                st_price = prices.get("STRAWBERRY", 0)
+                fert_price = prices.get("FERTILIZER", 100)
+                reserve = self._strawberry_fert_reserve(farm) if st_price >= fert_price else 0
                 qty = max(0, qty - reserve)
                 if qty <= 0:
                     continue
@@ -329,10 +333,14 @@ class FarmBrain:
             #    (see feed_reserve above) so there is no buy/sell oscillation.
             feed_need = (n_animals + n_pending) * 2
             have_wheat = shed.get("WHEAT", 0) + sum(inv.get("WHEAT", 0) for inv in invs)
-            if feed_need > 0 and have_wheat < feed_need and money >= 25:
-                want = min(feed_need - have_wheat, 6)
+            wheat_price = prices.get("WHEAT", 25)
+            if feed_need > 0 and have_wheat < feed_need and money >= wheat_price:
+                # Buy at the real price; when wheat is scarce/expensive buy less
+                # (rely on grown wheat / town drain) — never let the 2-day buffer
+                # goal blow the feed budget.
+                want = min(feed_need - have_wheat, 6 if wheat_price <= 30 else 4)
                 ops.append([BUY_PRODUCT, "WHEAT", want])
-                money -= 25 * want
+                money -= wheat_price * want
             # 2) ANIMALS: at hour 0 only, one per type (COW then SHEEP) while
             #    the plan/placeability/feed-budget allow. Placed BEFORE hiring
             #    so the market-order cap never starves the animal buys.
