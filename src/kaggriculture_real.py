@@ -153,6 +153,7 @@ class FarmBrain:
         max_hands: int = 2,
         seed_buffer: int = 6,
         buy_land_day: int | None = None,
+        mirror_land: bool = False,  # buy land to match the opponent's quadrants (tested: hurts)
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
         premium_sell_floor: float | None = 100,
@@ -175,6 +176,7 @@ class FarmBrain:
         self.max_hands = max_hands
         self.seed_buffer = seed_buffer  # keep at least this many seeds per crop
         self.buy_land_day = buy_land_day  # buy NE quadrant on this day if affordable
+        self.mirror_land = mirror_land  # buy land to match opponent's quadrants
         self.premium_sell_per_turn = premium_sell_per_turn  # cap premium units/turn
         # Max simultaneous premium plants on the field. Capping production
         # avoids flooding the shared market (town drains only ~1 premium/day).
@@ -279,6 +281,20 @@ class FarmBrain:
                     if money >= next_cost + 400:  # keep ~$400 float for feed
                         ops.append([BUY_LAND])
                         money -= next_cost
+        # MIRROR QUADRANTS: buy land to match the opponent's expansion. If they
+        # unlock more tiles and we don't, they get 2-3x production capacity and
+        # out-produce us in the head-to-head. Buying the same quadrants keeps
+        # tile parity (defensive), even if our farming on the new tiles is not
+        # perfectly efficient. Never starves the feed/animals budget.
+        elif self.mirror_land and not self.buy_land_day:
+            opp_farms = obs.get("farms", [])
+            opp_quads = len(opp_farms[1].get("unlocked_quadrants", [])) if len(opp_farms) > 1 else 1
+            my_quads = len(farm.get("unlocked_quadrants", []))
+            if opp_quads > my_quads and my_quads < 3:
+                next_cost = (1000, 2000, 4000)[my_quads - 1]
+                if money >= next_cost + 400:
+                    ops.append([BUY_LAND])
+                    money -= next_cost
 
         # Full livestock economy: buy cows+sheep per the plan, keep wheat feed.
         # The market queue is capped at MAX_MARKET_ORDERS and processed in order,
