@@ -249,6 +249,8 @@ class FarmBrain:
         # the price recovers). Always dump in the final days of the season so
         # no value is left sitting in the shed.
         prices = obs.get("market", {}).get("prices", {})
+        # Opponent's visible production pressure, used to front-run their floods.
+        opp_supply = self._opponent_supply(obs) if self.livestock else {}
         # Livestock feed reserve: never sell wheat that animals need. Match the
         # buy-side 2-day buffer so wheat doesn't oscillate buy-then-sell.
         feed_reserve = 0
@@ -283,8 +285,15 @@ class FarmBrain:
             if item in self.PREMIUM:
                 price = prices.get(item, 0)
                 base = BASE_PRICES.get(item, 100)
+                opp = opp_supply.get(item, 0) if opp_supply else 0
                 if day >= SEASON_DAYS - 2:
                     pass  # final days: dump everything, don't cap
+                elif opp >= 4:
+                    # Opponent floods this product: don't add to the glut — the
+                    # price is already on its way to the floor. Dribble ours and
+                    # let the town absorb it; focus cash flow on products the
+                    # opponent does NOT produce.
+                    qty = min(qty, 2)
                 elif price >= base * 1.5:
                     # Market is hungry (e.g. milk/strawberry with shop demand):
                     # sell as fast as the market queue allows.
@@ -785,6 +794,32 @@ class FarmBrain:
                         best_d = d
                         best = (x, y)
         return best
+
+    def _opponent_supply(self, obs) -> dict:
+        """Estimate the opponent's production pressure per product from their
+        visible farm (their tiles are public). Used to front-run their market
+        floods: if the opponent raises many cows, the milk market will crash
+        when their milk hits — so our milk should be sold BEFORE that."""
+        farms = obs.get("farms", [])
+        opp = farms[1] if len(farms) > 1 else None
+        supply = {"MILK": 0, "WOOL": 0, "EGG": 0, "STRAWBERRY": 0, "WHEAT": 0, "MELON": 0}
+        if not isinstance(opp, dict):
+            return supply
+        tiles = opp.get("tiles", [])
+        for row in tiles:
+            for t in row:
+                if not isinstance(t, dict):
+                    continue
+                if t.get("kind") == KIND_PLANT:
+                    c = t.get("crop")
+                    if c in supply:
+                        supply[c] += 1
+                elif t.get("animal"):
+                    a = t["animal"]
+                    p = ANIMALS[a]["product"]
+                    if p in supply:
+                        supply[p] += 1
+        return supply
 
     @staticmethod
     def _zone_of(x: int, y: int) -> str:
