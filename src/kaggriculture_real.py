@@ -411,7 +411,9 @@ class FarmBrain:
         inventories = private.get("inventories", [])
         # priority buckets: water first (death), then harvest, dig, plant.
         # water_at_risk = plants one day from weeding (2 unwatered days -> weed).
-        water, water_at_risk, harvest, weed, plant = [], [], [], [], []
+        # harvest_full = ongoing crop about to cap its yield (must reap or the
+        # next production is wasted).
+        water, water_at_risk, harvest, harvest_full, weed, plant = [], [], [], [], [], []
         preferred = self._preferred_crops(obs, farm, day)
 
         for y in range(size):
@@ -437,7 +439,10 @@ class FarmBrain:
                                     water_at_risk.append((x, y))
                                 else:
                                     water.append((x, y))
-                            if tile.get("yield_units", 0) > 0:
+                            y_units = int(tile.get("yield_units", 0))
+                            if y_units >= cd["max_yield"] - 1:
+                                harvest_full.append((x, y))  # about to cap: reap now
+                            elif y_units > 0:
                                 harvest.append((x, y))
                         elif cd:
                             age = day - int(tile.get("planted_day", day))
@@ -518,6 +523,10 @@ class FarmBrain:
         # At-risk plants (1 day from weeding) out-rank normal watering.
         for xy in water_at_risk:
             tasks.append((-0.5, xy, [WATER], None, False))
+        # Ongoing crops about to cap yield: reap now so the next production
+        # isn't wasted. Beats normal watering, loses to at-risk watering.
+        for xy in harvest_full:
+            tasks.append((-0.25, xy, [HARVEST], None, False))
         for xy in water:
             tasks.append((0, xy, [WATER], None, False))
         for xy in harvest:
