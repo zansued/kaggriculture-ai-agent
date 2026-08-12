@@ -238,7 +238,8 @@ class TestFarmHandsAndPriceSelection(unittest.TestCase):
         obs["private"]["shed"]["MELON"] = 10
         action = brain.decide(obs)
         sell_ops = {op[1]: op[2] for op in action["market"] if op[0] == "SELL"}
-        self.assertEqual(sell_ops.get("MELON"), 2)
+        # Final days: no sell cap — dump the whole shed.
+        self.assertEqual(sell_ops.get("MELON"), 10)
 
     def test_staple_sell_unlimited(self):
         brain = FarmBrain(max_hands=2, seed_buffer=6)

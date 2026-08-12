@@ -34,6 +34,13 @@ ANIMALS = {
 }
 PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"]
 
+# Base market prices (from the competition rules / MARKET_PARAMS). Used to
+# judge whether the CURRENT market price signals strong or weak demand.
+BASE_PRICES = {
+    "WHEAT": 25, "CARROT": 35, "TOMATO": 60, "STRAWBERRY": 120, "MELON": 250,
+    "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100,
+}
+
 STARTING_MONEY = 3000
 BOARD_SIZE = 10
 TURNS_PER_DAY = 24
@@ -121,8 +128,10 @@ def _unfertilized_yield(crop: str) -> int:
 class FarmBrain:
     # Products whose market price crashes hard when we oversell (base > 100,
     # with a sharp above-I0 shape). Selling too many of these per turn floods
-    # the shared market and drives the price to the $1 floor.
-    PREMIUM = {"MELON", "STRAWBERRY"}
+    # the shared market and drives the price to the $1 floor. The sell logic is
+    # dynamic: strong prices (market hungry, e.g. milk/strawberry with shop
+    # demand) → sell fast; weak prices (glut) → dribble/hold.
+    PREMIUM = {"MELON", "STRAWBERRY", "MILK", "WOOL"}
 
     def __init__(
         self,
@@ -269,9 +278,19 @@ class FarmBrain:
                     continue
             if item in self.PREMIUM:
                 price = prices.get(item, 0)
-                if self.premium_sell_floor is not None and price < self.premium_sell_floor and day < SEASON_DAYS - 2:
-                    continue  # hold; price too low, will recover
-                qty = min(qty, self.premium_sell_per_turn)
+                base = BASE_PRICES.get(item, 100)
+                if day >= SEASON_DAYS - 2:
+                    pass  # final days: dump everything, don't cap
+                elif price >= base * 1.5:
+                    # Market is hungry (e.g. milk/strawberry with shop demand):
+                    # sell as fast as the market queue allows.
+                    qty = min(qty, 10)
+                elif price >= base * 1.1:
+                    qty = min(qty, 6)
+                elif self.premium_sell_floor is not None and price < self.premium_sell_floor:
+                    continue  # hold; price too low, town will drain and recover
+                else:
+                    qty = min(qty, self.premium_sell_per_turn)  # dribble, don't flood
             if qty > 0:
                 ops.append([SELL, item, qty])
                 # Track expected cash from this sale so buy decisions below use
