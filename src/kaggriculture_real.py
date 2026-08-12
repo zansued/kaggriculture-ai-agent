@@ -410,7 +410,8 @@ class FarmBrain:
         size = len(tiles)
         inventories = private.get("inventories", [])
         # priority buckets: water first (death), then harvest, dig, plant.
-        water, harvest, weed, plant = [], [], [], []
+        # water_at_risk = plants one day from weeding (2 unwatered days -> weed).
+        water, water_at_risk, harvest, weed, plant = [], [], [], [], []
         preferred = self._preferred_crops(obs, farm, day)
 
         for y in range(size):
@@ -432,7 +433,10 @@ class FarmBrain:
                             # yield>0 only got harvested and never watered, so
                             # it withered and strawberry production collapsed.
                             if needs_water:
-                                water.append((x, y))
+                                if int(tile.get("consecutive_unwatered", 0)) >= 1:
+                                    water_at_risk.append((x, y))
+                                else:
+                                    water.append((x, y))
                             if tile.get("yield_units", 0) > 0:
                                 harvest.append((x, y))
                         elif cd:
@@ -446,7 +450,10 @@ class FarmBrain:
                             if (age >= cd["max_yield_day"] or (self.harvest_at_cap and at_cap)) and yield_units > 0:
                                 harvest.append((x, y))
                             elif needs_water:
-                                water.append((x, y))
+                                if int(tile.get("consecutive_unwatered", 0)) >= 1:
+                                    water_at_risk.append((x, y))
+                                else:
+                                    water.append((x, y))
                     elif kind == KIND_WEED:
                         weed.append((x, y))
 
@@ -508,6 +515,9 @@ class FarmBrain:
         tasks = list(animal_tasks)
         if fert_specialist_cmd is None:
             tasks.extend(fert_tasks)
+        # At-risk plants (1 day from weeding) out-rank normal watering.
+        for xy in water_at_risk:
+            tasks.append((-0.5, xy, [WATER], None, False))
         for xy in water:
             tasks.append((0, xy, [WATER], None, False))
         for xy in harvest:
@@ -776,11 +786,11 @@ class FarmBrain:
         tiles = farm.get("tiles", [])
 
         # ---- (A) chores for already-placed animals --------------------------
-        unfed = []
+        unfed = []  # (x, y, at_risk) — at_risk = unfed for 1 day, escapes at 2
         for x, y, t in self._all_animals(farm):
             animal = t["animal"]
             if not t.get("fed_today", False):
-                unfed.append((x, y))
+                unfed.append((x, y, int(t.get("consecutive_unfed", 0)) >= 1))
             if t.get("fertilizer_available", False):
                 tasks.append((-1, (x, y), [COLLECT_FERTILIZER], None, False))
             if t.get("yield_units", 0) > 0:
@@ -793,21 +803,25 @@ class FarmBrain:
         # so feeding never stalls while a single carrier walks a long way.
         # Restock tasks are marked `shareable=True` so several units may target
         # the same shed tile in the same turn (each picking up a small batch).
+        # Animals one day from escaping (consecutive_unfed >= 1) get rank -2 so
+        # they're fed before anything else.
         if unfed:
             inventories = private.get("inventories", [])
             n_unfed = len(unfed)
+            n_urgent = sum(1 for _, _, at_risk in unfed if at_risk)
             n_carry_wheat = sum(1 for inv in inventories if inv.get("WHEAT", 0) > 0)
             n_free = sum(
                 1 for inv in inventories
                 if inv.get("WHEAT", 0) <= 0 and not any(a in inv for a in ANIMALS)
             )
-            for xy in unfed:
-                tasks.append((-1, xy, [FEED], "WHEAT", False))
+            for ux, uy, at_risk in unfed:
+                tasks.append((-2 if at_risk else -1, (ux, uy), [FEED], "WHEAT", False))
             if shed.get("WHEAT", 0) > 0:
                 need = max(0, n_unfed - n_carry_wheat)
                 for _ in range(min(n_free, need, 3)):
                     batch = min(shed.get("WHEAT", 0), max(1, n_unfed), 2)
-                    tasks.append((-1, _shed_tile(farm), [PICKUP, "WHEAT", batch], "!WHEAT", True))
+                    rank = -2 if n_urgent > 0 else -1
+                    tasks.append((rank, _shed_tile(farm), [PICKUP, "WHEAT", batch], "!WHEAT", True))
 
         # ---- (B) place/build unplaced animals --------------------------------
         for animal, target in self.animal_plan:
