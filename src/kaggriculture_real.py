@@ -41,6 +41,20 @@ BASE_PRICES = {
     "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100,
 }
 
+# Town shops and the products they consume (2 = single-product shop, 2x drain).
+# Each unlocked instance adds that demand; more shops => the market drains
+# faster => prices rise for those products.
+SHOP_DEMAND = {
+    "BAKERY": {"EGG": 1, "WHEAT": 1},
+    "PIZZA_SHOP": {"MILK": 1, "TOMATO": 1, "WHEAT": 1},
+    "BRUNCH_SPOT": {"EGG": 1, "WHEAT": 1, "STRAWBERRY": 1},
+    "YARN_STORE": {"WOOL": 2},
+    "ICE_CREAM_SHOP": {"STRAWBERRY": 1, "MILK": 1, "WHEAT": 1},
+    "PET_CAFE": {"CARROT": 2},
+    "SMOOTHIE_SHOP": {"STRAWBERRY": 1, "MILK": 1},
+    "FARMERS_MARKET": {"WHEAT": 1, "CARROT": 1, "TOMATO": 1, "STRAWBERRY": 1},
+}
+
 STARTING_MONEY = 3000
 BOARD_SIZE = 10
 TURNS_PER_DAY = 24
@@ -251,6 +265,8 @@ class FarmBrain:
         prices = obs.get("market", {}).get("prices", {})
         # Opponent's visible production pressure, used to front-run their floods.
         opp_supply = self._opponent_supply(obs) if self.livestock else {}
+        # Town-shop consumption per product (drives prices up when shops unlock).
+        shop_demand = self._shop_demand(obs)
         # Livestock feed reserve: never sell wheat that animals need. Match the
         # buy-side 2-day buffer so wheat doesn't oscillate buy-then-sell.
         feed_reserve = 0
@@ -286,17 +302,17 @@ class FarmBrain:
                 price = prices.get(item, 0)
                 base = BASE_PRICES.get(item, 100)
                 opp = opp_supply.get(item, 0) if opp_supply else 0
+                shop = shop_demand.get(item, 0)
                 if day >= SEASON_DAYS - 2:
                     pass  # final days: dump everything, don't cap
-                elif opp >= 4:
-                    # Opponent floods this product: don't add to the glut — the
-                    # price is already on its way to the floor. Dribble ours and
-                    # let the town absorb it; focus cash flow on products the
-                    # opponent does NOT produce.
+                elif opp >= 4 and shop == 0:
+                    # Opponent floods this product and no shop buys it: don't add
+                    # to the glut — the price is on its way to the floor. Dribble
+                    # and let the town center absorb it.
                     qty = min(qty, 2)
-                elif price >= base * 1.5:
-                    # Market is hungry (e.g. milk/strawberry with shop demand):
-                    # sell as fast as the market queue allows.
+                elif shop >= 2 or price >= base * 1.5:
+                    # Shop demand is strong OR the market is hungry: the town
+                    # drains this product — sell as fast as the queue allows.
                     qty = min(qty, 10)
                 elif price >= base * 1.1:
                     qty = min(qty, 6)
@@ -794,6 +810,16 @@ class FarmBrain:
                         best_d = d
                         best = (x, y)
         return best
+
+    def _shop_demand(self, obs) -> dict:
+        """Total town-shop consumption multiplier per product from the unlocked
+        shops (visible in obs.town.unlocked_shops). Higher demand => the market
+        drains faster => prices rise => sell more of those products."""
+        demand: dict = {}
+        for shop in obs.get("town", {}).get("unlocked_shops", []) or []:
+            for product, mult in SHOP_DEMAND.get(shop, {}).items():
+                demand[product] = demand.get(product, 0) + mult
+        return demand
 
     def _opponent_supply(self, obs) -> dict:
         """Estimate the opponent's production pressure per product from their
