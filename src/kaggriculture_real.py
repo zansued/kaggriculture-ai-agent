@@ -154,6 +154,7 @@ class FarmBrain:
         seed_buffer: int = 6,
         buy_land_day: int | None = None,
         mirror_land: bool = False,  # buy land to match the opponent's quadrants (tested: hurts)
+        clone_quadrant: bool = False,  # clone home-quadrant crop layout onto bought land
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
         premium_sell_floor: float | None = 100,
@@ -177,6 +178,7 @@ class FarmBrain:
         self.seed_buffer = seed_buffer  # keep at least this many seeds per crop
         self.buy_land_day = buy_land_day  # buy NE quadrant on this day if affordable
         self.mirror_land = mirror_land  # buy land to match opponent's quadrants
+        self.clone_quadrant = clone_quadrant  # clone home-quadrant crop layout
         self.premium_sell_per_turn = premium_sell_per_turn  # cap premium units/turn
         # Max simultaneous premium plants on the field. Capping production
         # avoids flooding the shared market (town drains only ~1 premium/day).
@@ -627,7 +629,13 @@ class FarmBrain:
         for xy in plant:
             if xy in st_priority:
                 continue
-            crop = _plantable_crop()
+            # CLONE QUADRANT: when planting on bought (non-NW) land, mirror the
+            # crop that sits on the corresponding home-quadrant tile, so the
+            # expanded layout mirrors the proven NW pattern (Gui's idea).
+            clone_crop = None
+            if self.clone_quadrant:
+                clone_crop = self._mirrored_home_crop(farm, xy[0], xy[1])
+            crop = clone_crop if clone_crop is not None else _plantable_crop()
             if crop:
                 # Plant at rank 2.5 (after weeding) so freed tiles actually get
                 # re-cropped instead of sitting idle while hands chase watering/
@@ -864,6 +872,25 @@ class FarmBrain:
                     if p in supply:
                         supply[p] += 1
         return supply
+
+    def _mirrored_home_crop(self, farm, x: int, y: int):
+        """Crop on the home (NW) tile that mirrors this tile around the shed.
+
+        Shed at (4.5, 4.5). NE (x>=5,y<5) mirrors to NW at (9-x, y); SW to
+        (x, 9-y); SE to (9-x, 9-y). Returns the crop name if that NW tile is a
+        plant, else None. Used by the clone-quadrant planting preference.
+        """
+        if x < 5 and y < 5:
+            return None  # already in NW
+        mx = 9 - x if x >= 5 else x
+        my = 9 - y if y >= 5 else y
+        tiles = farm.get("tiles", [])
+        if not (0 <= my < len(tiles) and 0 <= mx < len(tiles[0])):
+            return None
+        t = tiles[my][mx]
+        if isinstance(t, dict) and t.get("kind") == KIND_PLANT:
+            return t.get("crop")
+        return None
 
     @staticmethod
     def _zone_of(x: int, y: int) -> str:
