@@ -155,6 +155,7 @@ class FarmBrain:
         buy_land_day: int | None = None,
         mirror_land: bool = False,  # buy land to match the opponent's quadrants (tested: hurts)
         clone_quadrant: bool = False,  # clone home-quadrant crop layout onto bought land
+        shop_aware_animals: bool = False,  # shift animal mix toward shop demand
         premium_sell_per_turn: int = 2,
         max_premium_plants: int | None = None,
         premium_sell_floor: float | None = 100,
@@ -179,6 +180,7 @@ class FarmBrain:
         self.buy_land_day = buy_land_day  # buy NE quadrant on this day if affordable
         self.mirror_land = mirror_land  # buy land to match opponent's quadrants
         self.clone_quadrant = clone_quadrant  # clone home-quadrant crop layout
+        self.shop_aware_animals = shop_aware_animals  # shift animal mix toward shop demand
         self.premium_sell_per_turn = premium_sell_per_turn  # cap premium units/turn
         # Max simultaneous premium plants on the field. Capping production
         # avoids flooding the shared market (town drains only ~1 premium/day).
@@ -305,6 +307,17 @@ class FarmBrain:
         # start producing fertilizer ASAP), then hands, then seeds fill what's
         # left. On day 0 this matches the reference agent's 4-animal opening.
         if self.livestock:
+            # SHOP-AWARE ANIMAL MIX: shift the herd toward products the town
+            # shops demand (Yarn Store -> wool/sheep; Pizza/IceCream/Smoothie ->
+            # milk/cows). Production adapts to demand, not just selling.
+            if self.shop_aware_animals:
+                shops = set(obs.get("town", {}).get("unlocked_shops", []) or [])
+                yarn = "YARN_STORE" in shops
+                milk_demand = bool(shops & {"PIZZA_SHOP", "ICE_CREAM_SHOP", "SMOOTHIE_SHOP"})
+                cows = 9 + (2 if milk_demand else 0) - (1 if yarn else 0)
+                sheep = 4 + (2 if yarn else 0) - (1 if milk_demand else 0)
+                cows = max(6, min(cows, 12)); sheep = max(2, min(sheep, 6))
+                self.animal_plan = [("COW", cows), ("SHEEP", sheep)]
             invs = private.get("inventories", [])
             n_animals = self._total_animals(farm)
             n_pending = sum(
