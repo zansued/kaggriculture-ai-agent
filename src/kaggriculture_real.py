@@ -41,6 +41,31 @@ BASE_PRICES = {
     "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100,
 }
 
+# Empirical per-day average market prices (from top-agent replay ep92714267,
+# module 1.32.6). Used to pick crops by the price EXPECTED AT HARVEST rather
+# than the current spot price: strawberry crashes after ~day 20, melon after
+# ~day 11, wheat rises into the late game, etc. The curve is a prior — the
+# exact game shifts by seed (price luck), but the lifecycle shape is stable.
+PRICE_CURVES = {
+    "WHEAT":      [27, 28, 30, 31, 32, 32, 32, 34, 35, 36, 37, 39, 40, 40, 41, 42, 43, 43, 44, 45, 45, 45, 45, 46, 46, 45, 45, 45, 44, 41],
+    "CARROT":     [35, 36, 36, 37, 38, 38, 39, 39, 39, 39, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41],
+    "TOMATO":     [60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+    "STRAWBERRY": [127, 131, 134, 142, 151, 158, 164, 169, 174, 178, 183, 186, 190, 193, 195, 197, 195, 192, 176, 175, 130, 96, 23, 11, 10, 8, 17, 10, 21, 23],
+    "MELON":      [255, 259, 261, 263, 265, 266, 267, 268, 269, 270, 255, 169, 170, 172, 173, 175, 172, 141, 88, 80, 36, 3, 6, 9, 12, 15, 18, 21, 24, 27],
+    "FERTILIZER": [100, 99, 98, 97, 95, 93, 90, 88, 86, 82, 79, 75, 71, 66, 62, 58, 54, 49, 48, 45, 43, 40, 36, 34, 31, 28, 24, 19, 13, 9],
+    "MILK":       [168, 171, 174, 176, 178, 180, 187, 196, 193, 195, 206, 212, 216, 218, 216, 206, 199, 182, 144, 139, 90, 85, 70, 90, 80, 91, 67, 73, 55, 63],
+    "WOOL":       [205, 208, 211, 213, 214, 216, 199, 166, 168, 155, 84, 87, 121, 142, 162, 172, 192, 209, 224, 227, 232, 235, 237, 239, 240, 241, 242, 243, 243, 244],
+}
+
+
+def _expected_price_at(crop: str, day: int) -> int:
+    """Prior expected market price for `crop` on `day` (clamped to the curve)."""
+    curve = PRICE_CURVES.get(crop)
+    if not curve:
+        return BASE_PRICES.get(crop, 50)
+    day = max(0, min(int(day), len(curve) - 1))
+    return curve[day]
+
 # Town shops and the products they consume (2 = single-product shop, 2x drain).
 # Each unlocked instance adds that demand; more shops => the market drains
 # faster => prices rise for those products.
@@ -172,6 +197,8 @@ class FarmBrain:
         max_wheat_plants: int | None = None,  # cap total wheat plants (livestock)
         strawberry_target: int = 0,  # maintain this many strawberry plants (0=off)
         seed_buffers: dict | None = None,  # per-crop seed buffer override
+        hand_ramp: list | None = None,  # daily max-hands schedule (index=day); hires capped by day
+        price_window_plant: bool = False,  # score crops by expected harvest-window price, not spot
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -242,6 +269,16 @@ class FarmBrain:
         self.max_wheat_plants = max_wheat_plants
         self.strawberry_target = strawberry_target
         self.seed_buffers = seed_buffers or {}
+        # Hands are re-hired EVERY DAY (engine resets them at day boundary) at a
+        # fibonacci cost, so over-hiring early burns gold that could buy animals
+        # (the production engine). hand_ramp caps daily hiring by day — index=day,
+        # value=max hands that day, clamped to max_hands. Matches the top agent's
+        # gradual 4→12 ramp instead of the old hire-8-from-day-0 default.
+        if hand_ramp is not None:
+            self.hand_ramp = [min(int(h), self.max_hands) for h in hand_ramp]
+        else:
+            self.hand_ramp = None
+        self.price_window_plant = price_window_plant
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -363,11 +400,17 @@ class FarmBrain:
                         if len(ops) >= MAX_MARKET_ORDERS:
                             return ops[:MAX_MARKET_ORDERS]
             # 3) HIRE: spread across the day (max 2/turn) so hands ramp up
-            #    without consuming the whole hour-0 market budget.
+            #    without consuming the whole hour-0 market budget. Daily cap is
+            #    `max_hands`, optionally reduced by the day-based hand_ramp
+            #    schedule (hands reset every day, so hiring beyond today's work
+            #    just wastes fibonacci-cost gold).
             n_hands = len(farm.get("hands", []))
-            if n_hands < self.max_hands:
+            day_cap = self.max_hands
+            if self.hand_ramp is not None and day < len(self.hand_ramp):
+                day_cap = min(day_cap, self.hand_ramp[day])
+            if n_hands < day_cap:
                 n_hired = int(farm.get("hires_today", 0))
-                for _ in range(min(2, self.max_hands - n_hands)):
+                for _ in range(min(2, day_cap - n_hands)):
                     cost = _fib(n_hired)
                     if money < cost:
                         break
@@ -1096,6 +1139,13 @@ class FarmBrain:
                 if self.max_melon_plants is not None and self._count_melon_plants(farm) >= self.max_melon_plants:
                     continue
             yield_est = _unfertilized_yield(crop)
+            # Price-window planting: score by the EXPECTED price at harvest
+            # (spot price ignores the crash/peak timing — e.g. planting melon
+            # late matures into a $3 market, planting strawberry late matures
+            # into a $8 crash). Uses the empirical lifecycle curve as a prior.
+            if self.price_window_plant:
+                harvest_day = day + (cd["first_yield_day"] if cd["ongoing"] else cd["max_yield_day"])
+                price = _expected_price_at(crop, harvest_day)
             profit = yield_est * price - cd["seed"]
             scored.append((profit, crop))
         scored.sort(reverse=True)
