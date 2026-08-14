@@ -199,6 +199,7 @@ class FarmBrain:
         seed_buffers: dict | None = None,  # per-crop seed buffer override
         hand_ramp: list | None = None,  # daily max-hands schedule (index=day); hires capped by day
         price_window_plant: bool = False,  # score crops by expected harvest-window price, not spot
+        zone_ownership: bool = False,  # strict home-zone per hand; block out-of-zone non-urgent tasks
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -279,6 +280,7 @@ class FarmBrain:
         else:
             self.hand_ramp = None
         self.price_window_plant = price_window_plant
+        self.zone_ownership = zone_ownership
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -715,6 +717,7 @@ class FarmBrain:
         # the time. This keeps expanded-land strawberry watered without letting
         # animals starve (the failure mode of a pure static split).
         zoning = len(farm.get("unlocked_quadrants", [])) > 1
+        n_unlocked = len(farm.get("unlocked_quadrants", []))
         n_field = max(0, min(4, len(positions) - 4)) if zoning else 0
         field_start = len(positions) - n_field
         inventories = private.get("inventories", [])
@@ -729,12 +732,25 @@ class FarmBrain:
             # Field hands alternate quadrants (even->NE, odd->SW) so the outer
             # crops in both bought quadrants get covered.
             field_zone = "NE" if (i - field_start) % 2 == 0 else "SW"
+            # STRICT ZONE OWNERSHIP: each hand has a fixed home zone (NW/NE/SW).
+            # Non-urgent tasks outside the home zone are BLOCKED entirely — a hand
+            # never crosses the map for a marginally better task. Only survival
+            # tasks (rank <= -0.5: at-risk feed / at-risk water) and shareable
+            # shed-restock may cross. This kills the thrashing the instrumentation
+            # measured (reactive75 had 393 zone-changes, 24% empty land, 4x water
+            # delay vs the purearch's disciplined 260 zone-changes on 75 tiles).
+            home_zone = None
+            if self.zone_ownership and i > 0:  # farmer stays zone-free (ranch lead)
+                home_zone = self._home_zone(i, len(positions), n_unlocked)
             best = None
             for rank, xy, action, cap, shareable in tasks:
                 if (not shareable) and xy in assigned:
                     continue
                 if not self._unit_capable(cap, inv):
                     continue
+                if home_zone is not None and rank > -0.5 and not shareable \
+                        and self._quad_zone(*xy) != home_zone:
+                    continue  # blocked: out of home zone, not urgent, not shareable
                 if rank <= -2 or rank == -0.5:
                     prio = 0  # urgent: at-risk animal/plant survival
                 elif rank < 0:
@@ -958,6 +974,33 @@ class FarmBrain:
         if x < 5 and y >= 5:
             return "SW"
         return "far"
+
+    @staticmethod
+    def _quad_zone(x: int, y: int) -> str:
+        """Pure quadrant zone: NW / NE / SW / SE (the board's 5x5 quadrants)."""
+        if y < 5 and x < 5:
+            return "NW"
+        if y < 5:
+            return "NE"
+        if x < 5:
+            return "SW"
+        return "SE"
+
+    def _home_zone(self, i: int, n_hands: int, n_unlocked: int) -> str | None:
+        """Home zone for hand index i given how many hands and unlocked quadrants.
+        The ranch lives in NW (shed + animals), so NW gets the first third of
+        hands; NE and SW split the rest. When fewer quadrants are unlocked the
+        spare hands crowd NW."""
+        if n_unlocked <= 1:
+            return "NW"
+        if n_unlocked == 2:  # NW + NE
+            return "NE" if i >= (n_hands + 1) // 2 else "NW"
+        third = max(1, (n_hands + 1) // 3)
+        if i < third:
+            return "NW"
+        if i < 2 * third:
+            return "NE"
+        return "SW"
 
     # ---- capability tags for multi-step choreography ------------------------ #
     # Each animal chore task carries a `cap` tag. The assignment loop only lets

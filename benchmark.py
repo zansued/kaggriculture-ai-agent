@@ -125,6 +125,27 @@ VARIANT_CONFIGS: dict[str, dict] = {
                             "strawberry_target": 12, "max_wheat_plants": 30},
     "land7_h14_st16_w40": {"buy_land_day": 7, "livestock_hands": 14,
                            "strawberry_target": 16, "max_wheat_plants": 40},
+    # Animal-mix tweaks from microbenchmark (COW $140/action > SHEEP $136/action;
+    # keep 13 structures so tile count unchanged).
+    "l_103": {"animal_plan": [["COW", 10], ["SHEEP", 3]]},
+    "l_102": {"animal_plan": [["COW", 10], ["SHEEP", 2]]},
+    "l_112": {"animal_plan": [["COW", 11], ["SHEEP", 2]]},
+    "l_113": {"animal_plan": [["COW", 11], ["SHEEP", 3]]},
+    # 12-animal mixes (12 structures -> 13 crop tiles)
+    "l_84": {"animal_plan": [["COW", 8], ["SHEEP", 4]]},
+    "l_93": {"animal_plan": [["COW", 9], ["SHEEP", 3]]},
+    "l_111": {"animal_plan": [["COW", 11], ["SHEEP", 1]]},
+    # 11-animal mixes (11 structures -> 14 crop tiles)
+    "l_92": {"animal_plan": [["COW", 9], ["SHEEP", 2]]},
+    "l_101": {"animal_plan": [["COW", 10], ["SHEEP", 1]]},
+    # --- zone ownership: strict home-zone per hand to kill 75-tile thrashing ---
+    "zone75": {"buy_land_day": 6, "zone_ownership": True},
+    "zone75_h10": {"buy_land_day": 6, "zone_ownership": True, "livestock_hands": 10},
+    "zone75_h12": {"buy_land_day": 6, "zone_ownership": True, "livestock_hands": 12},
+    "zone75_st12": {"buy_land_day": 6, "zone_ownership": True, "strawberry_target": 12},
+    "zone75_h12_st12": {"buy_land_day": 6, "zone_ownership": True, "livestock_hands": 12,
+                        "strawberry_target": 12, "max_wheat_plants": 30},
+    "reactive75_plain": {"buy_land_day": 6},  # land without zone ownership (control)
     # --- price-window planting: score crops by harvest-window price ---
     "pwp": {"price_window_plant": True},
     "pwp_st12_w30": {"price_window_plant": True, "strawberry_target": 12, "max_wheat_plants": 30},
