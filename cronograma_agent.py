@@ -18,8 +18,7 @@ import os
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.normpath(os.path.join(_HERE, '..', 'kaggriculture-ai-agent'))
-sys.path.insert(0, os.path.join(_REPO, 'src'))
+sys.path.insert(0, os.path.join(_HERE, 'src'))
 
 from kaggriculture_real import (  # noqa: E402
     CROPS, ANIMALS, SEASON_DAYS, MAX_MARKET_ORDERS,
@@ -60,7 +59,11 @@ class CronogramaAgent:
         self.wheat_cap_per_hand = wheat_cap_per_hand
         self.premium_cap_per_hand = premium_cap_per_hand
         # cronograma de compra de animais: dias em que compramos (1-based)
-        self.animal_days = animal_days or {1: 4, 6: 2, 7: 1, 9: 4, 10: 1, 11: 2}
+        # BEM atrasado: a economia de melon/wheat paga só no dia 10-12. Comprar
+        # animais antes disso zera o caixa e mata a fazenda (hands não são
+        # re-contratadas, colheitas morrem sem água). Depois do dia 12 o caixa
+        # do melão financia o gado.
+        self.animal_days = animal_days or {12: 2, 13: 2, 15: 4, 17: 2, 19: 2, 21: 2}
         self._n_animals_owned = {a: 0 for a, _ in animal_plan}
 
     # ---- entry ---------------------------------------------------------- #
@@ -101,34 +104,40 @@ class CronogramaAgent:
             if len(ops) >= MAX_MARKET_ORDERS:
                 return ops[:MAX_MARKET_ORDERS]
 
-        # 2) Animais no cronograma (comprar a cada dia conforme plano).
-        day_qty = self.animal_days.get(day, 0)
-        if hour == 0 and day_qty > 0:
-            remaining = day_qty
-            for animal, target in self.animal_plan:
-                if remaining <= 0:
-                    break
-                a = ANIMALS[animal]
-                # quantos já temos (colocados + no shed)
-                placed = self._count_animal(farm, animal)
-                owned = placed + int(shed.get(animal, 0) or 0)
-                to_buy = min(remaining, max(0, target - owned))
-                if to_buy > 0 and money >= a["cost"] * to_buy:
-                    ops.append([BUY_ANIMAL, animal, to_buy])
-                    money -= a["cost"] * to_buy
-                    remaining -= to_buy
+        # 2) Sementes em BURSTS (estilo purearch) — PRIORIDADE sobre animais:
+        #    o motor de colheita é quem financia o resto. Só no início do dia.
+        if hour == 0:
+            n_plants = self._count_plants(farm)
+            cap = self._capacity(farm)
+            room = max(0, cap - n_plants)
+            # melon: burst dias 0-3 (até 12 plantas)
+            if day <= 3 and room > 0:
+                n_melon = self._count_crop(farm, "MELON")
+                to_buy = min(5, room, max(0, 12 - n_melon))
+                if to_buy > 0 and money >= CROPS["MELON"]["seed"] * to_buy:
+                    ops.append([BUY_SEED, "MELON", to_buy])
+                    money -= CROPS["MELON"]["seed"] * to_buy
+            # strawberry: burst dias 5-12 (até o cap de premium)
+            if 5 <= day <= 12 and room > 0:
+                n_straw = self._count_crop(farm, "STRAWBERRY")
+                target = self.premium_cap_per_hand * max(1, self.max_hands)
+                have_s = seeds.get("STRAWBERRY", 0)
+                to_buy = min(5, room, max(0, target - n_straw - have_s))
+                if to_buy > 0 and money >= CROPS["STRAWBERRY"]["seed"] * to_buy:
+                    ops.append([BUY_SEED, "STRAWBERRY", to_buy])
+                    money -= CROPS["STRAWBERRY"]["seed"] * to_buy
+            # wheat: preenche o resto (até 8/turno)
+            if room > 0:
+                n_wheat = self._count_crop(farm, "WHEAT")
+                have_w = seeds.get("WHEAT", 0)
+                to_buy = min(8, room, max(0, 30 - n_wheat - have_w))
+                if to_buy > 0 and money >= CROPS["WHEAT"]["seed"] * to_buy:
+                    ops.append([BUY_SEED, "WHEAT", to_buy])
+                    money -= CROPS["WHEAT"]["seed"] * to_buy
             if len(ops) >= MAX_MARKET_ORDERS:
                 return ops[:MAX_MARKET_ORDERS]
 
-        # 3) Terra no dia programado (só no início do dia).
-        n_unlocked = len(farm.get("unlocked_quadrants", []))
-        if hour == 0 and self.buy_land_day and day >= self.buy_land_day and n_unlocked < 3:
-            next_cost = (1000, 2000, 4000)[n_unlocked - 1]
-            if money >= next_cost + 500:
-                ops.append([BUY_LAND])
-                money -= next_cost
-
-        # 4) Hands (até max_hands, custo fib). Limitado a 2/turno para espalhar
+        # 3) Hands (até max_hands, custo fib). Limitado a 2/turno para espalhar
         #    o custo; funciona em qualquer hora do dia (hands resetam diário).
         if n_hands < self.max_hands:
             n_hired = int(farm.get("hires_today", 0))
@@ -139,32 +148,35 @@ class CronogramaAgent:
                 ops.append([HIRE])
                 money -= cost
                 n_hired += 1
+            if len(ops) >= MAX_MARKET_ORDERS:
+                return ops[:MAX_MARKET_ORDERS]
 
-        # 5) Sementes: SÓ no início do dia (melon cedo, strawberry meio, wheat
-        #    sempre). Comprar a cada hora drena o caixa (90+/hora).
-        if hour == 0:
-            n_plants = self._count_plants(farm)
-            cap = self._capacity(farm)
-            room = max(0, cap - n_plants)
-            # wheat
-            if room > 2 and money >= CROPS["WHEAT"]["seed"]:
-                have_w = seeds.get("WHEAT", 0)
-                if have_w < 12:
-                    ops.append([BUY_SEED, "WHEAT", 1])
-                    money -= CROPS["WHEAT"]["seed"]
-            # strawberry (dias 5-16)
-            if 5 <= day <= 16 and room > 0 and money >= CROPS["STRAWBERRY"]["seed"]:
-                have_s = seeds.get("STRAWBERRY", 0)
-                n_straw = self._count_crop(farm, "STRAWBERRY")
-                if have_s < 6 and n_straw < self.premium_cap_per_hand * max(1, n_hands):
-                    ops.append([BUY_SEED, "STRAWBERRY", 1])
-                    money -= CROPS["STRAWBERRY"]["seed"]
-            # melon (dias 1-5)
-            if day <= 5 and money >= CROPS["MELON"]["seed"]:
-                n_melon = self._count_crop(farm, "MELON")
-                if n_melon < 9:
-                    ops.append([BUY_SEED, "MELON", 1])
-                    money -= CROPS["MELON"]["seed"]
+        # 4) Animais no cronograma (comprar a cada dia conforme plano).
+        #    Só se houver folga de caixa (money > 3x o custo do animal).
+        day_qty = self.animal_days.get(day, 0)
+        if hour == 0 and day_qty > 0:
+            remaining = day_qty
+            for animal, target in self.animal_plan:
+                if remaining <= 0:
+                    break
+                a = ANIMALS[animal]
+                placed = self._count_animal(farm, animal)
+                owned = placed + int(shed.get(animal, 0) or 0)
+                to_buy = min(remaining, max(0, target - owned))
+                if to_buy > 0 and money >= a["cost"] * to_buy * 3:
+                    ops.append([BUY_ANIMAL, animal, to_buy])
+                    money -= a["cost"] * to_buy
+                    remaining -= to_buy
+            if len(ops) >= MAX_MARKET_ORDERS:
+                return ops[:MAX_MARKET_ORDERS]
+
+        # 5) Terra no dia programado (só no início do dia, com folga).
+        n_unlocked = len(farm.get("unlocked_quadrants", []))
+        if hour == 0 and self.buy_land_day and day >= self.buy_land_day and n_unlocked < 3:
+            next_cost = (1000, 2000, 4000)[n_unlocked - 1]
+            if money >= next_cost + 1500:
+                ops.append([BUY_LAND])
+                money -= next_cost
 
         return ops[:MAX_MARKET_ORDERS]
 
@@ -191,22 +203,31 @@ class CronogramaAgent:
     def _unit_action(self, obs, farm, private, day, i, x, y, tiles, size, seeds, sheds, assigned):
         inv = self._inv(obs, i)
         tile = tiles[y][x] if 0 <= y < size and 0 <= x < size else None
+        shed = private.get("shed", {})
 
-        # A0) depositar produtos no shed --------------------------------------
+        # Carregando animal? NUNCA deixe o bloco de depósito engolir a unidade
+        # (era o livelock: load>0 com apenas COW/SHEEP no inv -> movia pro shed
+        #  eternamente, sem nunca chegar ao PLACE).
+        carrying_animal = any(int(inv.get(a, 0) or 0) > 0 for a in ("COW", "SHEEP"))
+        shed_has_animal = any(int(shed.get(a, 0) or 0) > 0 for a in ("COW", "SHEEP"))
+
+        # A0) depositar produtos no shed (SÓ não-animais) ----------------------
         load = sum(max(0, int(v or 0)) for v in inv.values())
-        if load > 0 and (x, y) in sheds:
+        if load > 0 and not carrying_animal:
             _prod = [k for k, v in inv.items() if int(v or 0) > 0 and k not in ANIMALS]
             _prod.sort(key=lambda k: -int(inv[k] or 0))
-            if _prod:
+            if _prod and (x, y) in sheds:
                 return ([PLACE, _prod[0], int(inv[_prod[0]])], None)
-        if load > 0:
-            t = min(sheds, key=lambda q: abs(q[0] - x) + abs(q[1] - y))
-            return (self._move(x, y, t[0], t[1], tiles), t)
+            if _prod:
+                t = min(sheds, key=lambda q: abs(q[0] - x) + abs(q[1] - y))
+                return (self._move(x, y, t[0], t[1], tiles), t)
 
         # A0b) colocar animais comprados (cadeia PICKUP -> BUILD -> PLACE) ----
-        shed = private.get("shed", {})
-        if any(int(shed.get(a, 0) or 0) > 0 for a in ("COW", "SHEEP")):
-            animal = "COW" if int(shed.get("COW", 0) or 0) > 0 else "SHEEP"
+        # SÓ o farmer (i==0) coloca animais — se as hands ajudam, a colocação
+        # preempta as colheitas e a fazenda não escala (medido: animals-on 11-14k
+        # vs animals-off 24-30k). Farmer dedicado = padrão kawashigi.
+        if (shed_has_animal or carrying_animal) and i == 0:
+            animal = "COW" if (int(shed.get("COW", 0) or 0) > 0 or int(inv.get("COW", 0) or 0) > 0) else "SHEEP"
             a = ANIMALS[animal]
             pasture_xy = self._find_empty_pasture(farm, animal, size)
             if pasture_xy is None:
@@ -236,16 +257,13 @@ class CronogramaAgent:
                 age = day - int(tile.get("planted_day", day))
                 if cd:
                     if cd["ongoing"]:
-                        if y_units > 0 and needs_water:
-                            if y_units >= cd["max_yield"] - 1:
-                                return ([HARVEST], None)
-                            return ([WATER], None)
                         if y_units >= cd["max_yield"]:
                             return ([HARVEST], None)
-                        if y_units > 0:
-                            return ([HARVEST], None)
+                        if y_units > 0 and needs_water:
+                            return ([WATER], None)
                         if needs_water:
                             return ([WATER], None)
+                        # colhe só no max_yield; yield parcial continua crescendo
                     else:
                         at_cap = y_units >= cd["max_yield"]
                         if (age >= cd["max_yield_day"] or (at_cap and y_units > 0)) and y_units > 0:
@@ -272,6 +290,13 @@ class CronogramaAgent:
         target, task, act = self._best_task(farm, obs, day, x, y, tiles, size, seeds, private, i, assigned)
         if target is None:
             return ([PASS], None)
+        # Feed choreography: FEED precisa wheat no inventário. Se não tem,
+        # desvia pro shed pegar wheat primeiro (senão chega e não alimenta).
+        if act == [FEED] and int(inv.get("WHEAT", 0) or 0) <= 0:
+            st = min(sheds, key=lambda q: abs(q[0] - x) + abs(q[1] - y))
+            if (x, y) == st:
+                return ([PICKUP, "WHEAT", 1], None)
+            return (self._move(x, y, st[0], st[1], tiles), st)
         if (x, y) == target:
             return (act, target)
         return (self._move(x, y, target[0], target[1], tiles), target)
@@ -301,11 +326,12 @@ class CronogramaAgent:
                 if (xx, yy) in assigned:
                     continue
                 if tiles[yy][xx] is None:
-                    # plantio em tile vazio: prioridade baixa, se houver semente
+                    # plantio em tile vazio: prioridade 20 (abaixo de regar 28,
+                    # acima de weed 15) — plantio não pode ser o último recurso.
                     crop = self._choose_plant(farm, private, day, seeds)
                     if crop and self._capacity(farm) > self._count_plants(farm):
                         d = abs(xx - x) + abs(yy - y)
-                        score = 2 * 100 - d
+                        score = 20 * 100 - d
                         if best_key is None or score > best_key:
                             best_key = score
                             best = ((xx, yy), [PLANT, crop])
@@ -332,8 +358,8 @@ class CronogramaAgent:
                             key, act = 45, [WATER]
                         elif needs_water:
                             key, act = 28, [WATER]
-                        elif y_units > 0:
-                            key, act = 10, [HARVEST]
+                        # NÃO colher ongoing com yield parcial: espera max_yield
+                        # (colher cedo = 1-3 units em vez de 4).
                     elif cd:
                         at_cap = y_units >= cd["max_yield"]
                         if (age >= cd["max_yield_day"] or at_cap) and y_units > 0:
@@ -345,6 +371,8 @@ class CronogramaAgent:
                 elif kind == KIND_WEED:
                     key, act = 15, [DIG]
                 elif kind == KIND_PASTURE or kind == KIND_COOP:
+                    if not t.get("animal"):
+                        continue  # pasto vazio: nada a fazer
                     if t.get("fertilizer_available", False):
                         key, act = 45, [COLLECT_FERTILIZER]
                     elif int(t.get("yield_units", 0) or 0) > 0:
@@ -370,7 +398,7 @@ class CronogramaAgent:
         n_m = self._count_crop(farm, "MELON")
         if day <= 5 and n_m < 9 and seeds.get("MELON", 0) > 0:
             return "MELON"
-        if 5 <= day <= 16 and n_s < self.premium_cap_per_hand * max(1, len(farm.get("hands", []))) and seeds.get("STRAWBERRY", 0) > 0:
+        if 5 <= day <= 16 and n_s < self.premium_cap_per_hand * max(1, self.max_hands) and seeds.get("STRAWBERRY", 0) > 0:
             return "STRAWBERRY"
         if seeds.get("WHEAT", 0) > 0:
             return "WHEAT"
@@ -405,7 +433,10 @@ class CronogramaAgent:
         )
 
     def _capacity(self, farm):
-        n_hands = len(farm.get("hands", []))
+        # IMPORTANTE: no hour 0 (quando compramos sementes) as hands JÁ
+        # resetaram (len=0), então usar n_hands atual trava a capacidade em ~10.
+        # Usamos max_hands planejado para a fazenda poder escalar.
+        n_hands = self.max_hands
         return self.wheat_cap_per_hand * max(1, n_hands) + \
             self.premium_cap_per_hand * max(1, n_hands)
 
