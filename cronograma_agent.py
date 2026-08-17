@@ -52,12 +52,14 @@ class CronogramaAgent:
         wheat_cap_per_hand=7,
         premium_cap_per_hand=3,
         animal_days=None,
+        travel_penalty=1,
     ):
         self.animal_plan = list(animal_plan)
         self.buy_land_day = buy_land_day
         self.max_hands = max_hands
         self.wheat_cap_per_hand = wheat_cap_per_hand
         self.premium_cap_per_hand = premium_cap_per_hand
+        self.travel_penalty = travel_penalty
         # cronograma de compra de animais: dias em que compramos (1-based).
         # DEFAULT OFF (vazio): hoje os animais são NET-NEGATIVE no cronograma
         # (medido: crop-only 25-29k > animals-on 16-17k) porque a economia de
@@ -361,14 +363,14 @@ class CronogramaAgent:
                         d = abs(xx - x) + abs(yy - y)
                         prio = 45 if at_risk else 25  # urgente > rega; normal abaixo
                         if have_wheat:
-                            score = prio * 100 - d
+                            score = prio * 100 - self.travel_penalty * d
                             if best_key is None or score > best_key:
                                 best_key = score
                                 best = ((xx, yy), [FEED])
                         elif shed_wheat > 0:
                             # restock: pega wheat no shed (shareable)
                             st = min(SHED_TILES, key=lambda q: abs(q[0]-x)+abs(q[1]-y))
-                            score = prio * 100 - (abs(st[0]-x)+abs(st[1]-y))
+                            score = prio * 100 - self.travel_penalty * (abs(st[0]-x)+abs(st[1]-y))
                             if best_key is None or score > best_key:
                                 best_key = score
                                 best = (st, [PICKUP, "WHEAT", 1])
@@ -385,7 +387,7 @@ class CronogramaAgent:
                     crop = self._choose_plant(farm, private, day, seeds)
                     if crop and self._capacity(farm) > self._count_plants(farm):
                         d = abs(xx - x) + abs(yy - y)
-                        score = 20 * 100 - d
+                        score = 20 * 100 - self.travel_penalty * d
                         if best_key is None or score > best_key:
                             best_key = score
                             best = ((xx, yy), [PLANT, crop])
@@ -444,8 +446,8 @@ class CronogramaAgent:
 
                 if key is not None:
                     dist = abs(xx - x) + abs(yy - y)
-                    # urgência - custo de movimento
-                    score = key * 100 - dist
+                    # urgência - custo de movimento (travel_penalty > 1 = batching)
+                    score = key * 100 - self.travel_penalty * dist
                     if best_key is None or score > best_key:
                         best_key = score
                         best = ((xx, yy), act)
