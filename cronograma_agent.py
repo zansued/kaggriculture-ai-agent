@@ -122,8 +122,8 @@ class CronogramaAgent:
                 if to_buy > 0 and money >= CROPS["MELON"]["seed"] * to_buy:
                     ops.append([BUY_SEED, "MELON", to_buy])
                     money -= CROPS["MELON"]["seed"] * to_buy
-            # strawberry: burst dias 5-12 (até o cap de premium)
-            if 5 <= day <= 12 and room > 0:
+            # strawberry: burst dias 5-16 (até o cap de premium)
+            if 5 <= day <= 16 and room > 0:
                 n_straw = self._count_crop(farm, "STRAWBERRY")
                 target = self.premium_cap_per_hand * max(1, self.max_hands)
                 have_s = seeds.get("STRAWBERRY", 0)
@@ -131,7 +131,9 @@ class CronogramaAgent:
                 if to_buy > 0 and money >= CROPS["STRAWBERRY"]["seed"] * to_buy:
                     ops.append([BUY_SEED, "STRAWBERRY", to_buy])
                     money -= CROPS["STRAWBERRY"]["seed"] * to_buy
-            # wheat: preenche o resto (até 8/turno)
+            # wheat: preenche o resto. Cap 30 — cap maior (60) PIOROU a produção
+            # (medido: 24-26k vs 28-29k) porque mais wheat = mais carga de rega
+            # sem mão de obra extra.
             if room > 0:
                 n_wheat = self._count_crop(farm, "WHEAT")
                 have_w = seeds.get("WHEAT", 0)
@@ -156,7 +158,23 @@ class CronogramaAgent:
             if len(ops) >= MAX_MARKET_ORDERS:
                 return ops[:MAX_MARKET_ORDERS]
 
-        # 4) Animais no cronograma (comprar a cada dia conforme plano).
+        # 4) Feed wheat: manter reserva no shed para alimentar animais.
+        #    Se o shed tem menos que a necessidade, COMPRA wheat (BUY_PRODUCT,
+        #    estilo top agent: 9-91/dia). Sem isso o FEED trava (livelock).
+        n_animals = self._count_animal(farm, "COW") + self._count_animal(farm, "SHEEP") \
+            + int(shed.get("COW", 0) or 0) + int(shed.get("SHEEP", 0) or 0)
+        if n_animals > 0:
+            feed_reserve = n_animals * 2
+            have_w = int(shed.get("WHEAT", 0) or 0)
+            need = max(0, feed_reserve - have_w)
+            wheat_price = prices.get("WHEAT", 30)
+            if need > 0 and money >= wheat_price * min(need, 20):
+                ops.append([BUY_PRODUCT, "WHEAT", min(need, 20)])
+                money -= wheat_price * min(need, 20)
+            if len(ops) >= MAX_MARKET_ORDERS:
+                return ops[:MAX_MARKET_ORDERS]
+
+        # 5) Animais no cronograma (comprar a cada dia conforme plano).
         #    Só se houver folga de caixa (money > 3x o custo do animal).
         day_qty = self.animal_days.get(day, 0)
         if hour == 0 and day_qty > 0:
@@ -309,11 +327,8 @@ class CronogramaAgent:
     def _best_task(self, farm, obs, day, x, y, tiles, size, seeds, private, unit_i, assigned=None):
         """Retorna (target_xy, descricao, acao) da tarefa de maior urgência."""
         zone = _quadrant(x, y)
-        # para o farmer (0), zona = NW + animais; para hands, zona fixa.
-        # mapa de zonas: hand i -> quadrante (rotaciona conforme unlocked)
         unlocked = farm.get("unlocked_quadrants", ["NW"])
         zone_order = ["NW", "NE", "SW"]
-        # unidade i cuida de zone_order[i % len(zone_order)]
         if unit_i == 0:
             my_zone = "NW"
         else:
@@ -323,6 +338,38 @@ class CronogramaAgent:
         best = None
         best_key = None
         assigned = assigned or set()
+
+        # ---- Animal FEEDING pipeline (porta do reactive): unidades sem wheat
+        # fazem restock no shed; as que têm wheat alimentam. Prioridade ALTA
+        # (45) — animal faminto foge e perde o investimento.
+        inv = self._inv(obs, unit_i)
+        shed = private.get("shed", {})
+        have_wheat = int(inv.get("WHEAT", 0) or 0) > 0
+        shed_wheat = int(shed.get("WHEAT", 0) or 0)
+        if shed_wheat > 0 or have_wheat:
+            for yy in range(size):
+                for xx in range(size):
+                    t = tiles[yy][xx]
+                    if not (isinstance(t, dict) and (t.get("kind") == KIND_PASTURE or t.get("kind") == KIND_COOP)):
+                        continue
+                    if not t.get("animal"):
+                        continue
+                    at_risk = int(t.get("consecutive_unfed", 0) or 0) >= 1
+                    if at_risk or not t.get("fed_today", False):
+                        d = abs(xx - x) + abs(yy - y)
+                        prio = 45 if at_risk else 25  # urgente > rega; normal abaixo
+                        if have_wheat:
+                            score = prio * 100 - d
+                            if best_key is None or score > best_key:
+                                best_key = score
+                                best = ((xx, yy), [FEED])
+                        elif shed_wheat > 0:
+                            # restock: pega wheat no shed (shareable)
+                            st = min(SHED_TILES, key=lambda q: abs(q[0]-x)+abs(q[1]-y))
+                            score = prio * 100 - (abs(st[0]-x)+abs(st[1]-y))
+                            if best_key is None or score > best_key:
+                                best_key = score
+                                best = (st, [PICKUP, "WHEAT", 1])
 
         for yy in range(size):
             for xx in range(size):
@@ -379,9 +426,12 @@ class CronogramaAgent:
                     if not t.get("animal"):
                         continue  # pasto vazio: nada a fazer
                     risk = int(t.get("consecutive_unfed", 0) or 0) >= 1
-                    if risk or not t.get("fed_today", False):
+                    if (risk or not t.get("fed_today", False)) \
+                            and int(private.get("shed", {}).get("WHEAT", 0) or 0) > 0:
                         # SOBREVIVÊNCIA primeiro: alimentar (30) antes de coletar
-                        # fertilizante (20) — animal faminto foge e perde tudo.
+                        # fertilizante (20). SÓ se há wheat no shed — senão o
+                        # FEED vira livelock de PICKUP (medido: farmer preso em
+                        # PICKUP WHEAT por horas).
                         key, act = 30, [FEED]
                     elif t.get("fertilizer_available", False):
                         key, act = 20, [COLLECT_FERTILIZER]
@@ -463,8 +513,9 @@ class CronogramaAgent:
         return [PASS]
 
     def _find_empty_pasture(self, farm, animal, size):
-        """Pasture vazio (sem animal) ou com o mesmo animal com slot livre."""
-        a = ANIMALS[animal]
+        """Pasture SEM animal. O engine coloca 1 animal por pasto (o reativo
+        usa _find_empty_structure com 'animal' not in t). Retornar pasto
+        ocupado faz o PLACE falhar e trava o farmer (BUG medido)."""
         tiles = farm.get("tiles", [])
         best = None
         best_d = 10 ** 9
@@ -473,17 +524,12 @@ class CronogramaAgent:
                 t = tiles[y][x]
                 if not (isinstance(t, dict) and t.get("kind") == KIND_PASTURE):
                     continue
-                cur = t.get("animal")
-                if cur is None:
-                    d = abs(x - 4) + abs(y - 4)
-                    if d < best_d:
-                        best_d = d
-                        best = (x, y)
-                elif cur == animal and int(t.get("held_count", 1) or 1) < a["max_held"]:
-                    d = abs(x - 4) + abs(y - 4)
-                    if d < best_d:
-                        best_d = d
-                        best = (x, y)
+                if "animal" in t:
+                    continue  # ocupado — cada animal precisa do seu pasto
+                d = abs(x - 4) + abs(y - 4)
+                if d < best_d:
+                    best_d = d
+                    best = (x, y)
         return best
 
     def _first_empty_tile(self, farm, size):
