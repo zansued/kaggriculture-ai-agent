@@ -96,6 +96,16 @@ def _execute(cls, obs, farm, private, day, hour, hi, pos):
     is_weed = isinstance(tile, dict) and tile.get("kind") == kr.KIND_WEED
     is_empty = tile is None
 
+    def _go_act(target, act):
+        if target is None:
+            return ["PASS"]
+        if (hx, hy) == target:
+            return act
+        return _move(hx, hy, target[0], target[1], tiles)
+
+    def _p(d):
+        return isinstance(d, dict)
+
     # OVERRIDE (survival): on an unwatered plant -> WATER. Without this the
     # classifier over-plants and crops die (measured: 0 plants by day 8).
     if is_plant and not tile.get("watered_today", False):
@@ -117,16 +127,6 @@ def _execute(cls, obs, farm, private, day, hour, hi, pos):
         target = _nearest(farm, lambda t: t is None, hx, hy)
         if target is not None:
             return _go_act(target, ["PLANT", plant_crop])
-
-    def _go_act(target, act):
-        if target is None:
-            return ["PASS"]
-        if (hx, hy) == target:
-            return act
-        return _move(hx, hy, target[0], target[1], tiles)
-
-    def _p(d):
-        return isinstance(d, dict)
 
     # WATER
     if cls == de.ACTION_CLASSES["WATER"]:
