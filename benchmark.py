@@ -172,6 +172,33 @@ VARIANT_CONFIGS: dict[str, dict] = {
     "goose": {"animal": "GOOSE", "animal_day": 2},
     "cow": {"animal": "COW", "animal_day": 3},
     "sheep": {"animal": "SHEEP", "animal_day": 3},
+    # --- 16/08: escala de terra (replicar c27: terra dia 11 + zone + hands) ---
+    "land11": {"buy_land_day": 11},
+    "land11_zone_h12": {"buy_land_day": 11, "zone_ownership": True, "livestock_hands": 12},
+    "land11_zone_h12_st25": {"buy_land_day": 11, "zone_ownership": True, "livestock_hands": 12,
+                             "strawberry_target": 25},
+    "land11_zone_h12_st25_w40": {"buy_land_day": 11, "zone_ownership": True, "livestock_hands": 12,
+                                 "strawberry_target": 25, "max_wheat_plants": 40},
+    "land14_zone_h14_st30_w50": {"buy_land_day": 14, "zone_ownership": True, "livestock_hands": 14,
+                                 "strawberry_target": 30, "max_wheat_plants": 50},
+    # Muitas hands para cobrir 75 tiles
+    "land11_h18": {"buy_land_day": 11, "livestock_hands": 18},
+    "land11_h22": {"buy_land_day": 11, "livestock_hands": 22},
+    "land11_h18_w60": {"buy_land_day": 11, "livestock_hands": 18, "max_wheat_plants": 60},
+    "land11_h18_w60_nostraw": {"buy_land_day": 11, "livestock_hands": 18, "max_wheat_plants": 60,
+                               "strawberry_target": 0},
+    # wheat rush na terra nova, hands moderadas
+    "land11_h12_nostraw": {"buy_land_day": 11, "livestock_hands": 12, "strawberry_target": 0},
+    "land11_h12_w60_nostraw": {"buy_land_day": 11, "livestock_hands": 12, "max_wheat_plants": 60,
+                               "strawberry_target": 0},
+    "land11_h12_w60_st12": {"buy_land_day": 11, "livestock_hands": 12, "max_wheat_plants": 60,
+                            "strawberry_target": 12},
+    "land14_h12_w60_nostraw": {"buy_land_day": 14, "livestock_hands": 12, "max_wheat_plants": 60,
+                               "strawberry_target": 0},
+    # isolar: menos animais = mais rega
+    "land11_h12_anim42": {"buy_land_day": 11, "livestock_hands": 12, "animal_plan": [["COW", 4], ["SHEEP", 2]]},
+    "land11_h12_anim0": {"buy_land_day": 11, "livestock_hands": 12, "animal_plan": []},
+    "land11_h12_anim62": {"buy_land_day": 11, "livestock_hands": 12, "animal_plan": [["COW", 6], ["SHEEP", 2]]},
 }
 
 
