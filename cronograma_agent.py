@@ -175,7 +175,9 @@ class CronogramaAgent:
                 return ops[:MAX_MARKET_ORDERS]
 
         # 5) Animais no cronograma (comprar a cada dia conforme plano).
-        #    Só se houver folga de caixa (money > 3x o custo do animal).
+        #    Guarda de caixa leve (1.5x) — animais cedo são o padrão do top
+        #    agent (d0: 2COW+2SHEEP). Com a colocação/feed corrigidos eles
+        #    produzem leite/fert que pagam o investimento.
         day_qty = self.animal_days.get(day, 0)
         if hour == 0 and day_qty > 0:
             remaining = day_qty
@@ -186,7 +188,7 @@ class CronogramaAgent:
                 placed = self._count_animal(farm, animal)
                 owned = placed + int(shed.get(animal, 0) or 0)
                 to_buy = min(remaining, max(0, target - owned))
-                if to_buy > 0 and money >= a["cost"] * to_buy * 3:
+                if to_buy > 0 and money >= a["cost"] * to_buy * 1.5:
                     ops.append([BUY_ANIMAL, animal, to_buy])
                     money -= a["cost"] * to_buy
                     remaining -= to_buy
