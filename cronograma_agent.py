@@ -58,12 +58,12 @@ class CronogramaAgent:
         self.max_hands = max_hands
         self.wheat_cap_per_hand = wheat_cap_per_hand
         self.premium_cap_per_hand = premium_cap_per_hand
-        # cronograma de compra de animais: dias em que compramos (1-based)
-        # BEM atrasado: a economia de melon/wheat paga só no dia 10-12. Comprar
-        # animais antes disso zera o caixa e mata a fazenda (hands não são
-        # re-contratadas, colheitas morrem sem água). Depois do dia 12 o caixa
-        # do melão financia o gado.
-        self.animal_days = animal_days or {12: 2, 13: 2, 15: 4, 17: 2, 19: 2, 21: 2}
+        # cronograma de compra de animais: dias em que compramos (1-based).
+        # DEFAULT OFF (vazio): hoje os animais são NET-NEGATIVE no cronograma
+        # (medido: crop-only 25-29k > animals-on 16-17k) porque a economia de
+        # produção ainda não sustenta a colocação + alimentação de 14 animais.
+        # Ative quando a produção escalar (via CronogramaAgent(animal_days={...})).
+        self.animal_days = animal_days or {}
         self._n_animals_owned = {a: 0 for a, _ in animal_plan}
 
     # ---- entry ---------------------------------------------------------- #
@@ -89,14 +89,19 @@ class CronogramaAgent:
         invs = private.get("inventories", [])
         n_hands = len(farm.get("hands", []))
 
-        # 1) Vender tudo do shed (em massa, priorizando valor).
+        # 1) Vender tudo do shed (em massa, priorizando valor). Mas RESERVA
+        #    wheat para alimentar animais — se vendermos tudo, eles passam fome
+        #    e fogem (investimento jogado fora). Reserva ~4/dia por animal.
+        n_animals = self._count_animal(farm, "COW") + self._count_animal(farm, "SHEEP") \
+            + int(shed.get("COW", 0) or 0) + int(shed.get("SHEEP", 0) or 0)
+        feed_need = n_animals * 2  # 2 wheat/animal/dia
         for item, qty in shed.items():
             q = int(qty)
             if q <= 0 or item in ANIMALS:
                 continue
-            if item == "WHEAT" and n_hands == 0 and day < SEASON_DAYS - 2:
-                # segura um pouco de wheat se não há hands (pouco provável)
-                q = max(0, q - 10)
+            if item == "WHEAT" and day < SEASON_DAYS - 2:
+                keep = max(0, feed_need - 10)
+                q = max(0, q - keep)
             if q <= 0:
                 continue
             ops.append([SELL, item, q])
@@ -373,13 +378,15 @@ class CronogramaAgent:
                 elif kind == KIND_PASTURE or kind == KIND_COOP:
                     if not t.get("animal"):
                         continue  # pasto vazio: nada a fazer
-                    if t.get("fertilizer_available", False):
-                        key, act = 45, [COLLECT_FERTILIZER]
+                    risk = int(t.get("consecutive_unfed", 0) or 0) >= 1
+                    if risk or not t.get("fed_today", False):
+                        # SOBREVIVÊNCIA primeiro: alimentar (30) antes de coletar
+                        # fertilizante (20) — animal faminto foge e perde tudo.
+                        key, act = 30, [FEED]
+                    elif t.get("fertilizer_available", False):
+                        key, act = 20, [COLLECT_FERTILIZER]
                     elif int(t.get("yield_units", 0) or 0) > 0:
                         key, act = 35, [HARVEST]
-                    elif not t.get("fed_today", False):
-                        # precisa wheat no inventário para FEED
-                        key, act = 22, [FEED]
                     elif not t.get("cared_today", False):
                         key, act = 12, [CARE]
 
