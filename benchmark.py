@@ -199,6 +199,13 @@ VARIANT_CONFIGS: dict[str, dict] = {
     "land11_h12_anim42": {"buy_land_day": 11, "livestock_hands": 12, "animal_plan": [["COW", 4], ["SHEEP", 2]]},
     "land11_h12_anim0": {"buy_land_day": 11, "livestock_hands": 12, "animal_plan": []},
     "land11_h12_anim62": {"buy_land_day": 11, "livestock_hands": 12, "animal_plan": [["COW", 6], ["SHEEP", 2]]},
+    # --- 18/08: adaptive market layer (shop-aware animal mix) ---
+    # Shifts the herd toward what the town's shops actually demand: Yarn Store
+    # -> more sheep/wool; Pizza/IceCream/Smoothie -> more cows/milk. This is the
+    # "opponent/strategic" lever the research program flagged as the only upside.
+    "shop_aware": {"shop_aware_animals": True},
+    "shop_aware_st12_w30": {"shop_aware_animals": True, "strawberry_target": 12, "max_wheat_plants": 30},
+    "shop_aware_h10": {"shop_aware_animals": True, "livestock_hands": 10},
 }
 
 
