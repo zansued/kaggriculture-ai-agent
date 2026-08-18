@@ -206,6 +206,14 @@ VARIANT_CONFIGS: dict[str, dict] = {
     "shop_aware": {"shop_aware_animals": True},
     "shop_aware_st12_w30": {"shop_aware_animals": True, "strawberry_target": 12, "max_wheat_plants": 30},
     "shop_aware_h10": {"shop_aware_animals": True, "livestock_hands": 10},
+    # --- 18/08: opponent-aware forced diversification ---
+    # Reads the opponent's VISIBLE farm and pivots away from crops they're
+    # flooding (they'd crash the shared market for both of us). The lever the
+    # research program flagged as unexplored.
+    "opp20": {"opponent_aware": True, "opponent_avoid_weight": 20},
+    "opp30": {"opponent_aware": True, "opponent_avoid_weight": 30},
+    "opp40": {"opponent_aware": True, "opponent_avoid_weight": 40},
+    "opp50": {"opponent_aware": True, "opponent_avoid_weight": 50},
 }
 
 

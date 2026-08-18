@@ -172,6 +172,12 @@ class FarmBrain:
     # demand) → sell fast; weak prices (glut) → dribble/hold.
     PREMIUM = {"MELON", "STRAWBERRY", "MILK", "WOOL"}
 
+    # Opponent-avoid crash sensitivity per crop (proxy for the market's
+    # above_target shape): melon/sq-crashes hardest, strawberry/linear next,
+    # staples absorb gluts. Used by the opponent-aware crop selection to pivot
+    # away from what the opponent is flooding.
+    _OPP_AVOID = {"MELON": 3.0, "STRAWBERRY": 1.8, "TOMATO": 1.2, "CARROT": 1.0, "WHEAT": 0.5}
+
     def __init__(
         self,
         crops: list[str] | None = None,
@@ -200,6 +206,8 @@ class FarmBrain:
         hand_ramp: list | None = None,  # daily max-hands schedule (index=day); hires capped by day
         price_window_plant: bool = False,  # score crops by expected harvest-window price, not spot
         zone_ownership: bool = False,  # strict home-zone per hand; block out-of-zone non-urgent tasks
+        opponent_aware: bool = False,  # pivot AWAY from crops the opponent floods
+        opponent_avoid_weight: float = 20.0,  # penalty per opponent plant on a crashed crop
     ) -> None:
         # Candidate crops (price-aware selection picks the best among these).
         self.crops = crops or list(CROPS.keys())
@@ -281,6 +289,8 @@ class FarmBrain:
             self.hand_ramp = None
         self.price_window_plant = price_window_plant
         self.zone_ownership = zone_ownership
+        self.opponent_aware = opponent_aware
+        self.opponent_avoid_weight = opponent_avoid_weight
 
     # ---- public entrypoint ------------------------------------------------- #
     def decide(self, obs: dict) -> dict:
@@ -926,7 +936,8 @@ class FarmBrain:
         when their milk hits — so our milk should be sold BEFORE that."""
         farms = obs.get("farms", [])
         opp = farms[1] if len(farms) > 1 else None
-        supply = {"MILK": 0, "WOOL": 0, "EGG": 0, "STRAWBERRY": 0, "WHEAT": 0, "MELON": 0}
+        supply = {"MILK": 0, "WOOL": 0, "EGG": 0, "STRAWBERRY": 0, "WHEAT": 0, "MELON": 0,
+                  "CARROT": 0, "TOMATO": 0}
         if not isinstance(opp, dict):
             return supply
         tiles = opp.get("tiles", [])
@@ -1158,6 +1169,7 @@ class FarmBrain:
     def _preferred_crops(self, obs, farm, day) -> list[str]:
         prices = obs.get("market", {}).get("prices", {})
         melon_price = prices.get("MELON", CROPS["MELON"].get("base", 250))
+        opp_supply = self._opponent_supply(obs) if self.opponent_aware else {}
         # Melon focus: while the gate is open and melon can still mature, put ALL
         # seed money and planting into melon (best per-tile crop by far).
         if self.melon_focus and self.melon_plant_gate is not None and melon_price >= self.melon_plant_gate:
@@ -1190,6 +1202,14 @@ class FarmBrain:
                 harvest_day = day + (cd["first_yield_day"] if cd["ongoing"] else cd["max_yield_day"])
                 price = _expected_price_at(crop, harvest_day)
             profit = yield_est * price - cd["seed"]
+            # Opponent-aware diversification: a crop the opponent floods will
+            # crash in the SHARED market no matter what I do, so its expected
+            # value drops. Penalize premium crashers more than staples. Cap the
+            # penalty so it reshuffles the ranking without fully vetoing.
+            if self.opponent_aware:
+                opp_count = opp_supply.get(crop, 0)
+                if opp_count > 0:
+                    profit -= self.opponent_avoid_weight * self._OPP_AVOID.get(crop, 1.0) * min(opp_count, 15)
             scored.append((profit, crop))
         scored.sort(reverse=True)
         return [c for _, c in scored]
