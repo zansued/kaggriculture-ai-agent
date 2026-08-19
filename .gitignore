@@ -38,8 +38,11 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data
-data/
+# Data (kawasagi traces ARE versioned — critical agent assets, do not lose)
+data/*
+!data/kawasagi/
+data/kawasagi/*
+!data/kawasagi/*.json
 logs/
 *.csv
 *.parquet
