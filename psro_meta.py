@@ -46,6 +46,10 @@ def _load_population():
     pop["trace_10c4s_mixed"] = _trace("trace_10c4s_mixed.json")
     pop["top_p1"] = _trace("trace_92730021_p1.json")
 
+    # Gui's c27_agent (self-contained): c27 trace + clone-detection front-run.
+    import c27_agent  # noqa: E402
+    pop["c27"] = c27_agent.agent
+
     def _fb(**cfg):
         b = kr.FarmBrain(**cfg)
         return lambda obs, c=None: b.decide(obs)
