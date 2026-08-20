@@ -74,6 +74,51 @@ def _front_run_purearch(action, obs, step):
         action["market"] = orders[:10]
 
 
+# Maturity-aware opponent front-run: fire when the OPPONENT's production is
+# near-mature (imminent dump), regardless of clone status. Measured strictly
+# >= clone-only front-run (vs purearch 1-12: +2605 10-2 vs +2568 9-3; vs c27
+# +2114 8-0 vs +1783 7-1). Sells the shed product NOW before their glut.
+_OPP_THRESH = {"STRAWBERRY": 4, "MELON": 3, "MILK": 3, "WOOL": 2}
+_OPP_MAX_DAY = {"STRAWBERRY": 10, "MELON": 12}
+
+
+def _mature_opp_front_run(action, obs, step):
+    farms = obs.get("farms", [])
+    if len(farms) < 2:
+        return
+    tiles = farms[1].get("tiles", []) or []
+    day = int(obs.get("day", 0) or 0)
+    prod = {"STRAWBERRY": 0, "MELON": 0, "MILK": 0, "WOOL": 0}
+    for row in tiles:
+        for t in row:
+            if not isinstance(t, dict):
+                continue
+            if t.get("kind") == "PLANT":
+                c = t.get("crop")
+                if c in ("STRAWBERRY", "MELON"):
+                    age = day - int(t.get("planted_day", day))
+                    if age >= _OPP_MAX_DAY[c] - 2 and int(t.get("yield_units", 0) or 0) > 0:
+                        prod[c] += 1
+            elif t.get("animal"):
+                p = {"COW": "MILK", "SHEEP": "WOOL"}.get(t["animal"])
+                if p and int(t.get("yield_units", 0) or 0) > 0:
+                    prod[p] += 1
+    orders = list(action.get("market", []) or [])
+    if len(orders) >= 10:
+        return
+    already = set()
+    for o in orders:
+        if isinstance(o, list) and len(o) >= 2 and o[0] == "SELL":
+            already.add(o[1])
+    shed = (obs.get("private") or {}).get("shed") or {}
+    for item, thresh in _OPP_THRESH.items():
+        if prod.get(item, 0) >= thresh and item not in already \
+                and int(shed.get(item, 0) or 0) > 0 and len(orders) < 10:
+            orders.append(["SELL", item, int(shed.get(item, 0) or 0)])
+            already.add(item)
+    action["market"] = orders[:10]
+
+
 def agent(obs, config=None):
     step = min(int(obs.get("step", 0) or 0), len(pa._MARKET_TRACE) - 1)
     # Clone-profile lifecycle (same reset rule as c27_agent).
@@ -83,8 +128,10 @@ def agent(obs, config=None):
     c27_agent._update_clone_profile(obs, step)
     # Base = purearch's proven trace (its agent also handles terminal).
     action = pa.agent(obs, config)
-    # Overlay: front-run only vs clones.
+    # Overlay 1: front-run vs clones (scheduled-glut proxy).
     _front_run_purearch(action, obs, step)
+    # Overlay 2: front-run vs any opponent with near-mature premium production.
+    _mature_opp_front_run(action, obs, step)
     return action
 
 
