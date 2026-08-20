@@ -10,7 +10,7 @@ _TRACE = json.loads(zlib.decompress(base64.b85decode(
 
 _SELLABLE = ("STRAWBERRY", "MELON", "MILK", "WOOL", "EGG", "TOMATO", "CARROT", "WHEAT", "FERTILIZER")
 
-_FRONT_RUN_HORIZON = 1
+_FRONT_RUN_HORIZON = 2  # look 2 turns ahead for the clone's glut (tuned: beats purearch h2h)
 _FRONT_RUN_ITEMS = ("MELON", "STRAWBERRY", "MILK", "WOOL")
 _BASE_PRICE = {"MELON": 250, "STRAWBERRY": 120, "MILK": 160, "WOOL": 200}
 _GLUT_WEIGHT = {"MELON": 3.5, "STRAWBERRY": 2.0, "MILK": 2.0, "WOOL": 3.2}
