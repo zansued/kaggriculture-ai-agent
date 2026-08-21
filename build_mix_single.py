@@ -90,7 +90,7 @@ def _front_run_purearch(action, obs, step):
 
 # Maturity-aware opponent front-run: fire when the OPPONENT's production is
 # near-mature (imminent dump), regardless of clone status.
-_OPP_THRESH = {"STRAWBERRY": 4, "MELON": 3, "MILK": 3, "WOOL": 2}
+_OPP_THRESH = {"STRAWBERRY": 6, "MELON": 4, "MILK": 4, "WOOL": 3}
 _OPP_MAX_DAY = {"STRAWBERRY": 10, "MELON": 12}
 
 

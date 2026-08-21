@@ -81,7 +81,7 @@ def _front_run_purearch(action, obs, step):
 # near-mature (imminent dump), regardless of clone status. Measured strictly
 # >= clone-only front-run (vs purearch 1-12: +2605 10-2 vs +2568 9-3; vs c27
 # +2114 8-0 vs +1783 7-1). Sells the shed product NOW before their glut.
-_OPP_THRESH = {"STRAWBERRY": 4, "MELON": 3, "MILK": 3, "WOOL": 2}
+_OPP_THRESH = {"STRAWBERRY": 6, "MELON": 4, "MILK": 4, "WOOL": 3}
 _OPP_MAX_DAY = {"STRAWBERRY": 10, "MELON": 12}
 # Aug-20 sweep: the maturity overlay costs ~1.6k/game in MARGIN vs purearch
 # (clone-only +4.09k/j vs +2.47k/j, 20 seeds), BUT it converts to more WINS:
