@@ -1,15 +1,18 @@
-"""mix_agent: purearch base trace + c27's clone-detection front-run overlay.
+"""mix_agent v2: purearch base trace + c27's clone-detection front-run +
+maturity-aware opponent front-run.
 
-Motivation (measured): c27's front-run makes it beat purearch ONLY vs clones
-(+61 vs purearch), but its base trace is ~2-5k WEAKER than purearch vs non-
-clones (top_p1: c27 +84k vs purearch +89k; reactive: +78k vs +81k). So the
-best-of-both agent is purearch's strong trace + the front-run overlay that
-only fires when the opponent looks like a clone (similar build -> will dump
-the same premium products -> sell 2 turns before the joint glut).
+Aug-20 re-validation: a clone-only variant (maturity OFF) had a HIGHER margin
+vs purearch (+4.09k/j vs +2.47k/j, 20 seeds), but the maturity overlay
+converts margin into WINS — the metric the ladder actually rates. H2H direct
+v2(maturity) vs v3(clone-only) = 11-1, and vs c27 = 11-1 (clone-only only
+3-9). The maturity overlay is therefore KEPT ON (see _ENABLE_MATURITY_FRONT_RUN).
 
-This replays purearch's actions and, when c27's clone confidence >= 2, adds a
-front-run SELL for the premium product purearch is about to dump (read from
-purearch's own future market trace as a proxy for the clone's glut).
+How it works: purearch's strong trace is the base (it beats non-clones).
+c27's clone-detection front-run fires when the opponent looks like a clone
+(similar build -> same glut -> sell premium ~2 turns before the joint dump).
+The maturity overlay generalizes beyond clones: it sells shed premium product
+when the OPPONENT's production is near-mature (imminent dump), regardless of
+clone status.
 
 Usage: import mix_agent; mix_agent.agent(obs) — self-contained (stdlib only)
 """
@@ -80,6 +83,11 @@ def _front_run_purearch(action, obs, step):
 # +2114 8-0 vs +1783 7-1). Sells the shed product NOW before their glut.
 _OPP_THRESH = {"STRAWBERRY": 4, "MELON": 3, "MILK": 3, "WOOL": 2}
 _OPP_MAX_DAY = {"STRAWBERRY": 10, "MELON": 12}
+# Aug-20 sweep: the maturity overlay costs ~1.6k/game in MARGIN vs purearch
+# (clone-only +4.09k/j vs +2.47k/j, 20 seeds), BUT it converts to more WINS:
+# h2h v2(maturity) vs v3(clone-only) = 11-1; vs c27 = 11-1 (v3 only 3-9).
+# The ladder rates W/D/L, not margin, so the maturity overlay STAYS ON.
+_ENABLE_MATURITY_FRONT_RUN = True
 
 
 def _mature_opp_front_run(action, obs, step):
@@ -131,7 +139,9 @@ def agent(obs, config=None):
     # Overlay 1: front-run vs clones (scheduled-glut proxy).
     _front_run_purearch(action, obs, step)
     # Overlay 2: front-run vs any opponent with near-mature premium production.
-    _mature_opp_front_run(action, obs, step)
+    # ON (see _ENABLE_MATURITY_FRONT_RUN): it converts margin into WINS.
+    if _ENABLE_MATURITY_FRONT_RUN:
+        _mature_opp_front_run(action, obs, step)
     return action
 
 
