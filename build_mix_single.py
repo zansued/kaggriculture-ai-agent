@@ -131,6 +131,26 @@ def _mature_opp_front_run(action, obs, step):
     action["market"] = orders[:10]
 
 
+# Order-slot sell-first (market-chess insight): market orders process by
+# position — a SELL in an earlier slot alters the price a later-slot SELL
+# (the opponent's) faces. Put premium sells first. Measured +3355 vs purearch.
+_FRONT_FIRST_ITEMS = ("MELON", "STRAWBERRY", "MILK", "WOOL")
+
+
+def _sell_first(action, obs, step):
+    market = list(action.get("market", []) or [])
+    sells = []
+    others = []
+    for o in market:
+        if isinstance(o, list) and len(o) >= 3 and o[0] == "SELL":
+            sells.append(o)
+        else:
+            others.append(o)
+    sells.sort(key=lambda o: (o[1] not in _FRONT_FIRST_ITEMS, -(o[2] or 0)))
+    action["market"] = (sells + others)[:10]
+    return action
+
+
 def agent(obs, config=None):
     step = min(int(obs.get("step", 0) or 0), len(pa._MARKET_TRACE) - 1)
     # Clone-profile lifecycle (same reset rule as c27_agent).
@@ -144,7 +164,8 @@ def agent(obs, config=None):
     _front_run_purearch(action, obs, step)
     # Overlay 2: front-run vs any opponent with near-mature premium production.
     _mature_opp_front_run(action, obs, step)
-    return action
+    # Overlay 3: order-slot sell-first (premium sells before opponent's).
+    return _sell_first(action, obs, step)
 '''
 
     header = f'''\
