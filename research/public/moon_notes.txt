@@ -1,0 +1,117 @@
+=== CODE 0 (244 chars) ===
+%pip install -q --disable-pip-version-check --no-deps kaggle-environments==1.32.7
+
+import importlib.metadata as _runtime_metadata
+assert _runtime_metadata.version('kaggle-environments') == '1.32.7'
+print('certified kaggle-environments 1.32.7')
+
+=== MD 1 ===
+# Kaggriculture Frontier | The Moon Counts Melons
+
+![Moonlit adaptive market route across the farm](attachment:moon_c166_adaptive_market_hero_v1.jpg)
+
+**V56: Adaptive Tomato and Egg Scarcity** — two disjoint, observation-gated production forks on top of the validated Moon market-horizon route. Tomato production is selected only by a strong public pizza/farmers-market prefix; egg production retains its bakery/brunch evidence and trace-derived vetoes.
+
+=== CODE 2 (525 chars) ===
+from pathlib import Path
+import base64, hashlib, io, tarfile, zlib
+import matplotlib.pyplot as plt
+import pandas as pd
+from kaggle_environments import make
+import kaggle_environments
+
+CANDIDATE_SHA = 'd2f51ca8851e563e3b8d24aeda28ff358bfdb8901039a89c39ff2e75aac68179'
+LOCAL_EVIDENCE_ENGINE_VERSION = '
+=== MD 3 ===
+## Strategy
+
+V56 preserves Moon's complete cow/sheep route family and its public shop router. Market-flow evidence scores opponent sale horizons from one through six steps, shifts at most one highest-value opportunity after persistent evidence, and repays every shifted order as explicit debt.
+
+The first tomato fork watches the first three public shops. With at least two PIZZA_SHOP or FARMERS_MARKET shops, it moves three seeds from the day-11 strawberry cohort into a relayed tomato purchase, trace-validates three real plantings and 12 harvested tomatoes, then holds the crop for the step-708 sca
+=== CODE 4 (559 chars) ===
+fit = pd.DataFrame([
+    ['V56 vs V50 fresh A/B', 64, 28, 14, 22, 566.516, 0],
+    ['Fresh hard panel', 64, 53, 11, 0, 23857.859, 0],
+    ['Fresh lower/complement panel', 64, 55, 9, 0, 11770.344, 0],
+    ['Independent Kaggle V15', 48, 37, 9, 2, 10230.250, 0],
+], columns=['panel','games','wins','loss
+=== MD 5 ===
+## Frozen selection result
+
+The earlier tomato experiment was not economically rejected: replay inspection proved that its full step-264 market skipped tomato seed purchase, so all three later plant actions were no-ops. Relaying the seed order to step 265 produced three real plants and 12 tomatoes. Holding those tomatoes for terminal scarcity changed the repaired paired control from -200 to +4,326 per seat. The generalized two-shop gate then gained +36,257 across 20 activated fresh seat-runs at 17-3, while non-triggered games remained exact controls. The complete held-egg cohort and its trace-
+=== CODE 6 (339 chars) ===
+exact_top = pd.DataFrame([
+    ['V56 local hard-panel block', 16, 14, 2, 12454.125],
+    ['V56 local extension block', 32, 26, 6, 7771.125],
+    ['V56 Kaggle V15 unseen seeds', 8, 7, 1, 4879.750],
+    ['Combined non-overlapping gate', 56, 47, 9, 8696.071],
+], columns=['evidence','games','wins','loss
+=== MD 7 ===
+## Exact-frontier gate
+
+The opponent is the exact public 2913.3 source (`f029fa…`), deduplicated from its lower-scoring byte-identical copy. Exact V56 bytes went 40-8 locally across 48 paired-seat games. A frozen, independently executed Kaggle V15 notebook reproduced SHA `d2f51ca8…` and added 7-1 on four unseen seeds. The non-overlapping direct gate is therefore 47-9 over 56 games on engine 1.32.7.
+
+=== CODE 8 (696 chars) ===
+ladder = pd.DataFrame([
+    ['exact 2913', 56, 47, 9, 0],
+    ['Kaito 2906', 16, 16, 0, 0],
+    ['v20 2733', 16, 14, 2, 0],
+    ['Rayk 2837 local + Kaggle', 24, 18, 6, 0],
+    ['inferred Soil local + Kaggle', 24, 16, 8, 0],
+    ['Crop 3041 local + Kaggle', 24, 24, 0, 0],
+    ['Ryo 3164 local + Kaggl
+=== MD 9 ===
+## Cross-meta validation
+
+V56 went 53-11 on the fresh hard panel and 55-9 on the lower/complement panel. Independent Kaggle V15 completed 48/48 valid games at 37-9-2 with exact remote bytes. Across local and Kaggle checks it is 24-0 against Crop, 18-6 against Rayk, 16-8 against inferred Soil, and 41-15 against the current Ryo tape. Five additional Ryo episode tapes add 27-13 with positive mean margin for every tape. Inferred Soil is retained as the second strategy family because it covers Moon's remaining specialist weaknesses.
+
+=== CODE 10 (629 chars) ===
+mechanism = pd.DataFrame([
+    ['Shop routing', 'first three unlocked shops', 'coherent cow/sheep route'],
+    ['Horizon inference', 'public inventory and quote deltas', 'one evidence-gated shift plus debt'],
+    ['Tomato cohort', 'two early pizza/farmers shops', 'three plants; terminal hold'],
+    
+=== MD 11 ===
+## Evidence boundary and risks
+
+All selection and validation used paired seats and exact source hashes. Shop sequences are captured from live observations because weed RNG consumption makes later shop draws action-dependent; seed-only shop precomputation is invalid. Tomato seed purchase, three plantings, 12 harvested units, and terminal sale are replay-validated. The egg fork remains a complete coherent cohort. Public leaderboard ratings remain noisy and do not replace a completed tied-notebook competition score.
+
+=== CODE 12 (523 chars) ===
+evidence = pd.DataFrame([
+    ['candidate_sha256','d2f51ca8851e563e3b8d24aeda28ff358bfdb8901039a89c39ff2e75aac68179'],
+    ['engine','1.32.7'],
+    ['exact_2913_local_record','40-8'],
+    ['exact_2913_kaggle_v15_fresh','7-1'],
+    ['exact_2913_combined_nonoverlap','47-9'],
+    ['kaggle_v15_record','
+=== MD 13 ===
+## Reproducible candidate bytes
+
+The next cell materializes exact V56 SHA-256 `d2f51ca8851e563e3b8d24aeda28ff358bfdb8901039a89c39ff2e75aac68179`. The final package contains the same `main.py` bytes.
+
+=== CODE 14 (121554 chars) ===
+PAYLOAD = 'c-ri`+0uf{nl*S{5p@rr1^R=w6`(k^BeNnPf`V|Mf{235gW`DY{qE}SKl&2-U`Ke8M4I_zlDP(A{nvl}7r{3L>JnX|CW?@l(v*?^^Pjk|eD~B$&#`Yl|2airb`G;5`zMWx{QS?u&9DDl&fz(APyd|D^Qp+)DE#MAn5mup_kaG!fBwhj>Sq7^{mg%?^VPh&QEK}Cr00JPl&8h%f4Vzq6#SDv&i?)U|IGJKo|>m~_J8~nM)^PIze&#NfBr{)HiQ3_{d09~`yBq0MMZl0>mU7ffByGBq#uQUt@L~
+=== MD 15 ===
+## Live execution proof
+
+Two deterministic episodes exercise the exact materialized V56 agent through all 720 calls in both seats using engine 1.32.7. This is a runtime/package gate; only a completed competition submission produces a public score.
+
+=== CODE 16 (463 chars) ===
+    agents=[str(MAIN_PATH),'starter'] if seat==0 else ['starter',str(MAIN_PATH)]
+    env.run(agents); mine=env.state[seat]
+=== MD 17 ===
+## Root-only bundle
+
+The final code cell writes one archive member, `main.py`, and proves its bytes equal the displayed candidate hash.
+
+=== CODE 18 (451 chars) ===
+ARCHIVE=Path('submission.tar.gz')
+with tarfile.open(ARCHIVE,'w:gz') as tf:
+ info=tarfile.TarInfo('main.py'); info.size=len(candidate_bytes); info.mtime=0; info.mode=0o644
+ tf.addfile(info,io.BytesIO(candidate_bytes))
+with tarfile.open(ARCHIVE,'r:gz') as tf:
+ names=tf.getnames(); bundled=tf.extractfi
+=== MD 19 ===
+## Final boundary
+
+This tied notebook publishes the exact V56 source, frozen engine-1.32.7 evidence, live execution proof, and a one-file verified bundle. Only a **COMPLETE** competition row with a non-empty public score establishes the official result.
