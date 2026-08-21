@@ -132,6 +132,7 @@ def _mature_opp_front_run(action, obs, step):
 # faces (the opponent's). Put the premium sells FIRST so the opponent's
 # later sells get a worse price. Zero capital cost (reordering only).
 # Measured vs purearch seeds 1-12: +3355 (11-1) vs +2605 (10-2) baseline.
+# (Threat-based refinement was WORSE — +3153 — simple premium-first is best.)
 _FRONT_FIRST_ITEMS = ("MELON", "STRAWBERRY", "MILK", "WOOL")
 
 
