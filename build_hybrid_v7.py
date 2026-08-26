@@ -1,0 +1,233 @@
+"""Build do bundle single-file do HÍBRIDO V7: Moon V56 + overlays do mix +
+glut-guard com timing de venda ADAPTATIVO POR STEP.
+
+V7 = hybrid_v6 + recalibração do _glut_guard para saturação de mercado:
+  1. Dump floor DINÂMICO por step para MILK/WOOL/MELON/STRAWBERRY:
+     - Começa mais alto cedo (capturar preço bom antes do glut)
+     - Decai linearmente até um piso baixo no fim da janela (desovar antes do colapso)
+  2. DUMP FORÇADO de colapso: MELON a partir de step 420 (~dia 17) e
+     STRAWBERRY a partir de step 500 (~dia 21) vendem a QUALQUER preço > 0
+     (não seguram estoque que vai colapsar para ~0).
+  3. Hold DINÂMICO dos grisers (WHEAT/CARROT/TOMATO):
+     - preço < base*1.1  -> segura 70%
+     - 1.1 <= preço < base*1.3 -> segura 40%
+     - preço >= base*1.3 -> vende tudo
+  4. Mantém _mature_opp_front_run e _sell_first do v6 inalterados.
+
+Motivação (facts 22/08): CARROT explode 35->279, TOMATO 60->409, WHEAT 29->47;
+MILK 175->7 e WOOL 212->5 colapsam. Strawberry crash pós-d21, melon pós-d10.
+A alavanca é timing de venda sob saturação, não replantio.
+
+Output: submissions/hybrid_v7/main.py
+Usage:   python build_hybrid_v7.py
+"""
+from __future__ import annotations
+
+import base64
+import zlib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+OUT = ROOT / "submissions" / "hybrid_v7" / "main.py"
+
+_MIX_OVERPRELUDE = '''\
+# ---------------------------------------------------------------------------
+# Overlays do mix_agent (validados) — injetados sobre a base Moon.
+# _mature_opp_front_run (vende quando produção do oponente está madura) e
+# _sell_first (order-slot: premium sells antes, piorando o preço do oponente).
+# ---------------------------------------------------------------------------
+_OPP_THRESH = {"STRAWBERRY": 4, "MELON": 2, "MILK": 4, "WOOL": 3}
+_OPP_MAX_DAY = {"STRAWBERRY": 10, "MELON": 12}
+_FRONT_FIRST_ITEMS = ("MELON", "STRAWBERRY", "MILK", "WOOL")
+
+
+def _mature_opp_front_run(action, obs, step):
+    farms = obs.get("farms", [])
+    if len(farms) < 2:
+        return
+    tiles = farms[1].get("tiles", []) or []
+    day = int(obs.get("day", 0) or 0)
+    prod = {"STRAWBERRY": 0, "MELON": 0, "MILK": 0, "WOOL": 0}
+    for row in tiles:
+        for t in row:
+            if not isinstance(t, dict):
+                continue
+            if t.get("kind") == "PLANT":
+                c = t.get("crop")
+                if c in ("STRAWBERRY", "MELON"):
+                    age = day - int(t.get("planted_day", day))
+                    if age >= _OPP_MAX_DAY[c] - 2 and int(t.get("yield_units", 0) or 0) > 0:
+                        prod[c] += 1
+            elif t.get("animal"):
+                p = {"COW": "MILK", "SHEEP": "WOOL"}.get(t["animal"])
+                if p and int(t.get("yield_units", 0) or 0) > 0:
+                    prod[p] += 1
+    orders = list(action.get("market", []) or [])
+    if len(orders) >= 10:
+        return
+    already = set()
+    for o in orders:
+        if isinstance(o, list) and len(o) >= 2 and o[0] == "SELL":
+            already.add(o[1])
+    shed = (obs.get("private") or {}).get("shed") or {}
+    for item, thresh in _OPP_THRESH.items():
+        if prod.get(item, 0) >= thresh and item not in already and int(shed.get(item, 0) or 0) > 0 and len(orders) < 10:
+            orders.append(["SELL", item, int(shed.get(item, 0) or 0)])
+            already.add(item)
+    action["market"] = orders[:10]
+
+
+def _sell_first(action, obs, step):
+    market = list(action.get("market", []) or [])
+    sells = []
+    others = []
+    for o in market:
+        if isinstance(o, list) and len(o) >= 3 and o[0] == "SELL":
+            sells.append(o)
+        else:
+            others.append(o)
+    sells.sort(key=lambda o: (o[1] not in _FRONT_FIRST_ITEMS, -(o[2] or 0)))
+    action["market"] = (sells + others)[:10]
+    return action
+
+
+# ---------------------------------------------------------------------------
+# V7: _glut_guard — timing de venda ADAPTATIVO POR STEP (saturação de mercado).
+# v2 validou dump global; v4 recalibrou (0.40, janela 250-650); v5 ajustou o
+# dump_floor POR ITEM; v6 adicionou front-run MELON 2 / STRAWB 4 (33-12 vs v5).
+# v7 torna o floor DINÂMICO (decai com o step), força dump de colapso para
+# MELON/STRAWBERRY tarde, e usa hold granular nos grisers.
+# ---------------------------------------------------------------------------
+_GBASE = {"WHEAT": 25, "CARROT": 35, "TOMATO": 60, "STRAWBERRY": 120,
+          "MELON": 250, "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100}
+_GRISERS = ("WHEAT", "CARROT", "TOMATO")
+_GRISE_MULT_LO = 1.1
+_GRISE_MULT = 1.3
+_GHOLD_LO = 0.7      # preço < base*1.1 -> segura 70%
+_GHOLD_HI = 0.4      # 1.1 <= preço < base*1.3 -> segura 40%
+_GDUMP = ("MILK", "WOOL", "MELON", "STRAWBERRY")
+# floor dinâmico por item: (floor_cedo, floor_tarde, step_do_piso)
+_GDUMP_PARAMS = {
+    "MILK":       (0.55, 0.30, 650),
+    "WOOL":       (0.55, 0.30, 650),
+    "MELON":      (0.55, 0.15, 500),
+    "STRAWBERRY": (0.50, 0.15, 550),
+}
+# a partir deste step, desova a QUALQUER preço > 0 (não segura colapso)
+_GDUMP_FORCE = {
+    "MELON": 420,
+    "STRAWBERRY": 500,
+}
+_GSTART = 250
+_GSTOP = 650
+
+
+def _floor_of(item, step):
+    if item not in _GDUMP_PARAMS:
+        return 0.45
+    f0, f1, turn = _GDUMP_PARAMS[item]
+    if step >= turn:
+        return f1
+    span = max(1, turn - _GSTART)
+    return f0 - (f0 - f1) * ((step - _GSTART) / span)
+
+
+def _glut_guard(action, obs, step):
+    if not (_GSTART <= step < _GSTOP):
+        return action
+    market = list(action.get("market", []) or [])
+    if not market:
+        return action
+    prices = ((obs.get("market") or {}).get("prices") or {})
+    shed = ((obs.get("private") or {}).get("shed") or {})
+    new_market = []
+    for o in market:
+        if isinstance(o, list) and len(o) >= 3 and o[0] == "SELL" and o[1] in _GBASE:
+            item = o[1]
+            qty = int(o[2] or 0)
+            if qty <= 0:
+                continue
+            price = float(prices.get(item, 0) or 0)
+            base = _GBASE[item]
+            if item in _GRISERS and price > 0 and price < base * _GRISE_MULT:
+                hold = _GHOLD_HI if price >= base * _GRISE_MULT_LO else _GHOLD_LO
+                keep = max(1, int(qty * hold))
+                new_market.append(["SELL", item, keep])
+            elif item in _GDUMP:
+                force = step >= _GDUMP_FORCE.get(item, 10 ** 9)
+                fl = _floor_of(item, step)
+                if (force and price > 0) or (price >= base * fl):
+                    avail = int(shed.get(item, 0) or 0)
+                    if avail > 0:
+                        new_market.append(["SELL", item, max(qty, avail)])
+                    else:
+                        new_market.append(o)
+                else:
+                    new_market.append(o)
+            else:
+                new_market.append(o)
+        else:
+            new_market.append(o)
+    action["market"] = new_market[:10]
+    return action
+
+
+def agent(obs, config=None):
+    step = int(obs.get("step", 0) or 0)
+    action = moon.agent(obs)
+    _mature_opp_front_run(action, obs, step)
+    action = _sell_first(action, obs, step)
+    action = _glut_guard(action, obs, step)
+    return action
+'''
+
+
+def _blob(path: Path) -> str:
+    src = path.read_text(encoding="utf-8")
+    idx = src.find("if __name__")
+    if idx > 0:
+        src = src[:idx]
+    return base64.b85encode(zlib.compress(src.encode("utf-8"))).decode("utf-8")
+
+
+def build() -> None:
+    moon_src = ROOT / "research" / "public" / "moon_agent_main.py"
+    moon_b = _blob(moon_src)
+
+    header = f'''"""hybrid_v7 - single-file Kaggle submission bundle.
+
+Moon V56 + overlays do mix (maturity front-run + order-slot sell-first) +
+glut-guard com timing ADAPTATIVO POR STEP (dump floor dinâmico, dump forçado
+de MELON/STRAWBERRY tarde, hold granular dos grisers). Janela 250-650.
+
+Built by build_hybrid_v7.py. Self-contained: embute moon_agent_main.py
+(zlib+base85) e injeta os overlays inline.
+"""
+from __future__ import annotations
+
+import base64
+import types
+import zlib
+
+_MOON_B85 = {moon_b!r}
+
+
+def _load(blob, modname):
+    code = zlib.decompress(base64.b85decode(blob)).decode("utf-8")
+    ns = types.ModuleType(modname)
+    ns.__file__ = modname + ".py"
+    exec(compile(code, modname + ".py", "exec"), ns.__dict__)
+    return ns
+
+
+moon = _load(_MOON_B85, "moon_agent_main")
+'''
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(header + _MIX_OVERPRELUDE, encoding="utf-8")
+    print(f"OK -> {OUT} ({OUT.stat().st_size} bytes)")
+    print(f"    moon blob: {len(moon_b)} chars")
+
+
+if __name__ == "__main__":
+    build()

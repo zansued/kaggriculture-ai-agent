@@ -76,3 +76,5 @@ Pipfile.lock
 .env.development.local
 .env.test.local
 .env.production.local
+# Sweep logs
+sweep_combos*.log
