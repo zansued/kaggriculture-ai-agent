@@ -157,6 +157,21 @@ construir a fita. Resultados:
 ### Estado dos arquivos
 - `src/wheat_base_v0.py` — coordenador reativo wheat-heavy (WIP, não jogável ainda)
 - `src/wheat_farm.py` — FarmBrain com fertilização de wheat / modo wheat-heavy (experimental)
+- `src/wheat_base_v1.py` — agente determinístico wheat-heavy (v2 da coordenação; ainda com
+  bugs: PLACE de animais, rega diária). Serve de GERADOR de fita.
+- `build_wheat_base.py` — PIPELINE da Fase 3: agente gerador → fita 720-step →
+  bundle single-file. Valida a fita no engine. Pipeline FUNCIONAL (26/08); a fita
+  gerada ainda é fraca (~240 no seed 1) porque o gerador (wheat_base_v1) não
+  coordena bem. O próximo trabalho é melhorar o gerador.
+
+## 9. Estado do pipeline (26/08)
+- ✅ `build_wheat_base.py --seed 1 --tape ... --validate --build` funciona:
+  gera fita, valida reward, embute `submissions/wheat_base/main.py`.
+- ❌ A fita atual joga ~240 (seed 1) — o gerador `wheat_base_v1` falha na
+  coordenação (animais não são PLACE, plantas morrem por falta de rega).
+- ⏭️ Próximo passo: corrigir o `wheat_base_v1` (sequenciamento de tarefas) OU
+  usar o FarmBrain como gerador temporário (fita ~55-70k) para ter um baseline
+  da fita, e iterar a economia wheat-heavy a partir daí.
 
 ## 7. Métricas de sucesso
 - h2h vs hybrid_v6 (24-36 seeds, 2 lados): base wheat-heavy vence em W/L.
