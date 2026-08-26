@@ -70,12 +70,28 @@ A lacuna **não** é escala de plantio nem terra (paridade). É:
 ## 4. Estado do projeto
 - [x] Diagnóstico (26/08): replay analisado, gap quantificado (49k no seed).
 - [x] Especificação (este documento).
-- [x] Fase 1 parcial: `_wheat_early_sell` com reserva de feed (build v12).
-      Smoke test OK (não quebra). LIÇÃO: sem excedente de produção não há o
-      que vender cedo — Fase 2 é o caminho real.
-- [ ] Fase 1: validar h2h vs v6 (24-36 seeds, 2 lados).
-- [ ] Fase 2: aumentar produção de wheat p/ gerar excedente vendável d11-14.
-- [ ] Fase 3: reavaliar base se overlays não bastarem.
+- [x] Fase 1: `_wheat_early_sell` com reserva de feed (build v12). VALIDADO
+      26/08: h2h 2 lados vs v6 (seeds 1-12) = **2-2, 8 ties, mean d=+84 → NEUTRO**.
+      LIÇÃO: sem excedente de produção não há o que vender cedo.
+- [x] Fase 2 EXPLORADA (26/08) — TODAS as hipóteses de overlay FALHARAM:
+  - `fert_dampen` (suprimir venda de fert barato): **1-11** vs v6 — enche o shed
+    (cap 100) e bloqueia itens premium. O v6 ESTÁ certo em despejar fert.
+  - `wheat_sell` (vender excedente wheat >= $30, reserva 40): **2-2** neutro.
+  - `strawb2wheat` (converter 50% dos plantios de strawberry p/ wheat): **0-12**
+    (mean -12.780) — strawberry (~$209/tile) vale muito mais que wheat (~$44).
+  - `wheat_arb` (comprar wheat barato e revender no pico): **2-2** neutro — o v6
+    já arbitra (BUY_PRODUCT WHEAT 487/jogo).
+  - CONCLUSÃO: o v6 é um ótimo local robusto; o gap de 49k do CropDusta vem de
+    uma economia wheat-heavy ESTRUTURAL (produção ~2-3x de wheat + rebanho com
+    mais ovelhas + terra 100% ocupada desde d0, sem terra livre p/ overlays).
+    Overlays NÃO capturam isso → **Fase 3 é obrigatória**.
+- [ ] Fase 3: construir base wheat-heavy do zero (rota nova coerente, top-down).
+  Evidência-chave do v6 no seed 507467650: terra livre = 0 em todos os dias
+  (grid 100% ocupado d0); vende 856 wheat total (99% após d21); 2935 fert;
+  10COW+4SHEEP; compra 487 wheat (arbitragem).
+- [ ] OBSERVAÇÃO LADDER (26/08): submissão v6 12:14 = public 1346.0 — queda
+  grande vs v2 (2253 em 08-24) e v5 (1990 em 08-25). h2h local não traduz em
+  ELO; investigar se é volatilidade de snapshot ou o campo evoluiu demais.
 
 ## 5. Referências
 - Replay local: `C:/Users/zan_s/AppData/Local/Temp/replays/episode-99954642-replay.json`
