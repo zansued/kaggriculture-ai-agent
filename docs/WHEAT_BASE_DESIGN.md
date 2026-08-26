@@ -129,6 +129,35 @@ com a fertilização, o mix e o timing de venda integrados desde o design
 `sweep_fase2.py` (repo) — harness de overlays + transformação de fita, já com
 todas as hipóteses refutadas documentadas nos resultados h2h.
 
+## 8. Protótipo reativo — EVIDÊNCIA 26/08 (iterações)
+
+Testamos coordenadores reativos (greedy) para validar a economia antes de
+construir a fita. Resultados:
+
+| Protótipo | Descrição | Resultado |
+|---|---|---|
+| `wheat_base_v0` (coordenador novo) | wheat 15 tiles + 2COW+2SHEEP, NW apenas | ❌ 0.9-2.8k (coordenação básica falha: animais nunca PLACE, plantas morrem por falta de rega) |
+| `wheat_farm` (FarmBrain + fert-wheat) | fertiliza wheat jovem no coordenador existente | ❌ 2-10 vs FarmBrain (mean -5.370) — **strawberry usa melhor o fert** (+$240 vs +$80) |
+| `wheat_farm` iter2 (wheat-heavy) | remove STRAWBERRY, todo fert p/ wheat | ❌ 1-11 vs FarmBrain (mean -5.528) — **wheat puro não compensa sem strawberry** |
+
+**Conclusões duras:**
+1. **Coordenador greedy não escala** — re-inventar coordenação (PICKUP→PLACE→FEED→WATER) é
+   exatamente o que o FarmBrain (1257 linhas) e a fita Moon resolvem. `wheat_base_v0` morre
+   em coisas básicas (animais nunca colocados, plantas não regadas).
+2. **Strawberry é o motor de lucro por tile no reativo** — fertilizante é recurso limitado
+   (1/animal/dia) e rende mais no strawberry (+$240) que no wheat (+$80). Tirar strawberry
+   piora o reward.
+3. **O diferencial do CropDusta é ESCALA + COORDENAÇÃO, não composição** — FarmBrain (25
+   tiles) = 55-70k; Moon v6 (100 tiles, fita) = 105k+. "Wheat-heavy" funciona no contexto de
+   100 tiles com rotação fert e fita coordenada. Isolado, wheat puro é inferior a strawberry.
+4. ⇒ **Confirma o plano**: a rota nova (100 tiles, mix balanceado wheat+strawberry+animais,
+   fertilização do wheat como volume, não como substituto do strawberry) é o caminho. O
+   protótipo wheat_base_v0 fica como base de trabalho para o build da fita (não é jogável).
+
+### Estado dos arquivos
+- `src/wheat_base_v0.py` — coordenador reativo wheat-heavy (WIP, não jogável ainda)
+- `src/wheat_farm.py` — FarmBrain com fertilização de wheat / modo wheat-heavy (experimental)
+
 ## 7. Métricas de sucesso
 - h2h vs hybrid_v6 (24-36 seeds, 2 lados): base wheat-heavy vence em W/L.
 - Seed 507467650: reward > 125.270 (batendo CropDusta) ou ao menos > 75.889.
