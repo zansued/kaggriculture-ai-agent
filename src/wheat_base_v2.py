@@ -22,7 +22,7 @@ SHED = (4, 4)
 
 PARAMS = {
     "n_cow": 2,
-    "hands_target": 10,
+    "hands_target": 8,
     "wheat_target": 40,              # tiles de wheat (NW+NE+SW)
     "buy_land": True,                # NE d1, SW d5
     "wheat_reserve": 25,
@@ -171,6 +171,12 @@ class WheatBaseV2:
         seat = int(obs.get("player", 0) or 0) or int(obs.get("index", 0) or 0)
         step = int(obs.get("step", 0) or 0)
         day = int(obs.get("day", 0) or 0)
+        # RESET de estado a cada novo jogo (step 0)
+        if step == 0:
+            self.op_state[seat] = {
+                "bought": {"COW": 0},
+                "land": {"NE": False, "SW": False, "SE": False},
+            }
         farm = self._farm(obs, seat)
         private = obs.get("private", {}) or {}
         farmer_pos = tuple(farm.get("farmer", [4, 4]))
@@ -264,10 +270,15 @@ class WheatBaseV2:
         n_wheat = sum(1 for _, _, t in self._plants(farm) if t.get("crop") == "WHEAT")
         n_cow = sum(1 for _, _, t in self._animals(farm) if t.get("animal") == "COW") + int(shed.get("COW", 0) or 0)
 
-        # HIRE (escalar hands) — o Moon contrata até d27; caixa limita
-        if n_hands < PARAMS["hands_target"] and day < 27 and step % 24 < 4 and money > 150:
-            need = min(PARAMS["hands_target"] - n_hands, 10 - len(market))
-            market += [["HIRE"]] * need
+        # BUY_SEED WHEAT (mais no d0) — PRIORIDADE antes de HIRE
+        if day <= 20 and n_wheat < PARAMS["wheat_target"] and int(seeds.get("WHEAT", 0) or 0) < 12 and money > 60 and len(market) < 10:
+            q = 15 if day == 0 else 8
+            market.append(["BUY_SEED", "WHEAT", min(q, PARAMS["wheat_target"] - n_wheat)])
+
+        # BUY_PRODUCT WHEAT para FEED das COW (antes do wheat próprio maturar)
+        w_shed = int(shed.get("WHEAT", 0) or 0)
+        if day < 3 and (n_cow > 0 or st["bought"]["COW"] > 0) and w_shed < 12 and money > 250 and len(market) < 10:
+            market.append(["BUY_PRODUCT", "WHEAT", min(12 - w_shed, int(money // 30))])
 
         # BUY_LAND NE d1, SW d5
         if PARAMS["buy_land"]:
@@ -283,15 +294,11 @@ class WheatBaseV2:
             market.append(["BUY_ANIMAL", "COW", 1])
             st["bought"]["COW"] += 1
 
-        # BUY_SEED WHEAT (mais no d0 para plantar cedo)
-        if day <= 20 and n_wheat < PARAMS["wheat_target"] and int(seeds.get("WHEAT", 0) or 0) < 12 and money > 60 and len(market) < 10:
-            q = 15 if day == 0 else 8
-            market.append(["BUY_SEED", "WHEAT", min(q, PARAMS["wheat_target"] - n_wheat)])
-
-        # BUY_PRODUCT WHEAT para FEED das COW (antes do wheat próprio maturar)
-        w_shed = int(shed.get("WHEAT", 0) or 0)
-        if day < 6 and n_cow > 0 and w_shed < 12 and money > 300 and len(market) < 10:
-            market.append(["BUY_PRODUCT", "WHEAT", min(12 - w_shed, int(money // 30))])
+        # HIRE (escalar hands) — o Moon contrata até d27; caixa limita
+        if n_hands < PARAMS["hands_target"] and day < 27 and step % 24 < 4 and money > 150 and len(market) < 10:
+            max_now = 5 if day == 0 else 10
+            need = min(PARAMS["hands_target"] - n_hands, max_now, 10 - len(market))
+            market += [["HIRE"]] * need
 
         # SELL
         self._sell(market, day, shed)
@@ -299,7 +306,8 @@ class WheatBaseV2:
         return market[:10]
 
     def _sell(self, market, day, shed):
-        if 12 <= day <= 14 and int(shed.get("MILK", 0) or 0) > 0 and len(market) < 10:
+        # MILK: vender sempre que houver (produção d8+, pico d12-14)
+        if 8 <= day <= 20 and int(shed.get("MILK", 0) or 0) > 0 and len(market) < 10:
             market.append(["SELL", "MILK", int(shed.get("MILK", 0) or 0)])
         if day >= 26 and int(shed.get("WOOL", 0) or 0) > 0 and len(market) < 10:
             market.append(["SELL", "WOOL", int(shed.get("WOOL", 0) or 0)])
