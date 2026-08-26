@@ -115,6 +115,74 @@ def strawb_to_wheat(action, obs, step, cfg):
     return action
 
 
+def buy_land3(action, obs, step, cfg):
+    """Compra o 3º/4º quadrante cedo (mais terra) se ainda não desbloqueou tudo."""
+    if step > cfg.get("stop", 6*24):
+        return action
+    farms = obs.get("farms", []) or []
+    seat = int((obs or {}).get("index", 0) or 0)
+    if seat >= len(farms):
+        return action
+    mine = farms[seat]
+    unlocked = len(mine.get("unlocked_quadrants") or [])
+    max_q = cfg.get("max_q", 4)
+    if unlocked >= max_q:
+        return action
+    mkt = list(action.get("market") or [])
+    has_land = any(isinstance(o, list) and len(o) >= 1 and o[0] == "BUY_LAND" for o in mkt)
+    if not has_land and len(mkt) < 10:
+        mkt.append(["BUY_LAND"])
+        action["market"] = mkt[:10]
+    return action
+
+
+def fert_farm(action, obs, step, cfg):
+    """Usa FERTILIZER para fertilizar crops (dobra yield/dia) quando um unit está
+    sobre um tile PLANT não fertilizado e tem fert no inventário. Mantém venda como
+    fallback (não remove SELL FERTILIZER)."""
+    farms = obs.get("farms", []) or []
+    seat = int((obs or {}).get("index", 0) or 0)
+    if seat >= len(farms):
+        return action
+    mine = farms[seat]
+    tiles = mine.get("tiles", []) or []
+    day = int(obs.get("day", 0) or 0)
+    invs = ((obs.get("private") or {}).get("inventories") or [])
+    positions = [mine.get("farmer", [0, 0])] + list(mine.get("hands", []) or [])
+    hand_actions = list(action.get("hands") or [])
+    # (chave, idx_inv, pos, ação_atual)
+    units = [("farmer", 0, mine.get("farmer", [0, 0]), action.get("farmer"))]
+    for i in range(len(hand_actions)):
+        if 1 + i < len(positions):
+            units.append((f"h{i}", 1 + i, positions[1 + i], hand_actions[i]))
+    for key, inv_idx, pos, cur in units:
+        if not isinstance(cur, list) or not cur:
+            continue
+        if cur[0] not in ("PASS", "NORTH", "SOUTH", "EAST", "WEST", "WATER"):
+            continue
+        try:
+            x, y = int(pos[0]), int(pos[1])
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= y < len(tiles) and 0 <= x < len(tiles[y])):
+            continue
+        tile = tiles[y][x]
+        if not isinstance(tile, dict) or tile.get("kind") != "PLANT":
+            continue
+        if int(tile.get("fertilized_until_day", -1) or -1) >= day:
+            continue
+        inv = invs[inv_idx] if inv_idx < len(invs) else {}
+        if int((inv or {}).get("FERTILIZER", 0) or 0) <= 0:
+            continue
+        # fertiliza!
+        if key == "farmer":
+            action["farmer"] = ["FERTILIZE"]
+        else:
+            hand_actions[int(key[1:])] = ["FERTILIZE"]
+    action["hands"] = hand_actions
+    return action
+
+
 def wheat_arb(action, obs, step, cfg):
     """Intensifica arbitragem: compra wheat barato (preço <= lo) em lotes, até o shed
     estar quase cheio, para revender no pico."""
@@ -151,6 +219,8 @@ _OVERLAYS = {
     "wheat_agg": wheat_aggressive,
     "strawb2wheat": strawb_to_wheat,
     "wheat_arb": wheat_arb,
+    "fert_farm": fert_farm,
+    "buy_land3": buy_land3,
 }
 
 # ---------------------------------------------------------------- runner
