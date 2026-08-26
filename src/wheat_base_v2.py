@@ -21,10 +21,10 @@ PASTURES = [(0, 0), (1, 0)]          # 2 pastagens (2 COW)
 SHED = (4, 4)
 
 PARAMS = {
-    "n_cow": 2,
+    "n_cow": 2, "n_sheep": 0,
     "hands_target": 8,
     "wheat_target": 40,              # tiles de wheat (NW+NE+SW)
-    "buy_land": True,                # NE d1, SW d5
+    "buy_land": True,                # NE d1, SW d5, SE d9
     "wheat_reserve": 25,
     "sell_wheat_from": 9,
 }
@@ -86,14 +86,17 @@ class WheatBaseV2:
         invs = private.get("inventories") or [{}]
 
         # --- URGENTE: PICKUP->PLACE de animais (cadeia completa, PLACE primeiro) ---
-        n_carry_cow = sum(1 for inv in invs if int((inv or {}).get("COW", 0) or 0) > 0)
+        n_carry = sum(1 for inv in invs if int((inv or {}).get("COW", 0) or 0) > 0 or int((inv or {}).get("SHEEP", 0) or 0) > 0)
         n_pasture_free = sum(1 for row in tiles for t in row if isinstance(t, dict) and t.get("kind") == "PASTURE" and not t.get("animal"))
         for y, row in enumerate(tiles):
             for x, t in enumerate(row):
                 if isinstance(t, dict) and t.get("kind") == "PASTURE" and not t.get("animal"):
                     tasks.append((-140, "PLACE", (x, y), None))
-        if n_carry_cow < n_pasture_free and int(shed.get("COW", 0) or 0) > 0:
-            tasks.append((-130, "PICKUP", SHED, ("COW",)))
+        if n_carry < n_pasture_free:
+            for animal in ("COW", "SHEEP"):
+                if int(shed.get(animal, 0) or 0) > 0:
+                    tasks.append((-130, "PICKUP", SHED, (animal,)))
+                    break
 
         # --- URGENTE: alimentar animais (foge em 2 dias) ---
         # PICKUP WHEAT do shed se algum animal não alimentado e alguém sem wheat
@@ -174,7 +177,7 @@ class WheatBaseV2:
         # RESET de estado a cada novo jogo (step 0)
         if step == 0:
             self.op_state[seat] = {
-                "bought": {"COW": 0},
+                "bought": {"COW": 0, "SHEEP": 0},
                 "land": {"NE": False, "SW": False, "SE": False},
             }
         farm = self._farm(obs, seat)
@@ -269,18 +272,20 @@ class WheatBaseV2:
         n_hands = len(farm.get("hands") or [])
         n_wheat = sum(1 for _, _, t in self._plants(farm) if t.get("crop") == "WHEAT")
         n_cow = sum(1 for _, _, t in self._animals(farm) if t.get("animal") == "COW") + int(shed.get("COW", 0) or 0)
+        n_sheep = sum(1 for _, _, t in self._animals(farm) if t.get("animal") == "SHEEP") + int(shed.get("SHEEP", 0) or 0)
 
         # BUY_SEED WHEAT (mais no d0) — PRIORIDADE antes de HIRE
         if day <= 20 and n_wheat < PARAMS["wheat_target"] and int(seeds.get("WHEAT", 0) or 0) < 12 and money > 60 and len(market) < 10:
             q = 15 if day == 0 else 8
             market.append(["BUY_SEED", "WHEAT", min(q, PARAMS["wheat_target"] - n_wheat)])
 
-        # BUY_PRODUCT WHEAT para FEED das COW (antes do wheat próprio maturar)
+        # BUY_PRODUCT WHEAT para FEED dos animais (antes do wheat próprio maturar)
         w_shed = int(shed.get("WHEAT", 0) or 0)
-        if day < 3 and (n_cow > 0 or st["bought"]["COW"] > 0) and w_shed < 12 and money > 250 and len(market) < 10:
-            market.append(["BUY_PRODUCT", "WHEAT", min(12 - w_shed, int(money // 30))])
+        n_animals_owned = n_cow + n_sheep
+        if day < 5 and n_animals_owned > 0 and w_shed < 25 and money > 300 and len(market) < 10:
+            market.append(["BUY_PRODUCT", "WHEAT", min(25 - w_shed, int(money // 30))])
 
-        # BUY_LAND NE d1, SW d5
+        # BUY_LAND NE d1, SW d5, SE d9
         if PARAMS["buy_land"]:
             if not st["land"]["NE"] and day == 1 and money > 1200 and "NE" not in unlocked:
                 market.append(["BUY_LAND"])
@@ -289,10 +294,14 @@ class WheatBaseV2:
                 market.append(["BUY_LAND"])
                 st["land"]["SW"] = True
 
-        # BUY_ANIMAL COW
-        if day < 4 and n_cow < PARAMS["n_cow"] and money > 450 and len(market) < 10 and st["bought"]["COW"] < PARAMS["n_cow"]:
-            market.append(["BUY_ANIMAL", "COW", 1])
-            st["bought"]["COW"] += 1
+        # BUY_ANIMAL COW + SHEEP (alternando)
+        if day < 6:
+            if n_cow < PARAMS["n_cow"] and money > 450 and len(market) < 10 and st["bought"]["COW"] < PARAMS["n_cow"]:
+                market.append(["BUY_ANIMAL", "COW", 1])
+                st["bought"]["COW"] += 1
+            elif n_sheep < PARAMS["n_sheep"] and money > 550 and len(market) < 10 and st["bought"].get("SHEEP", 0) < PARAMS["n_sheep"]:
+                market.append(["BUY_ANIMAL", "SHEEP", 1])
+                st["bought"]["SHEEP"] = st["bought"].get("SHEEP", 0) + 1
 
         # HIRE (escalar hands) — o Moon contrata até d27; caixa limita
         if n_hands < PARAMS["hands_target"] and day < 27 and step % 24 < 4 and money > 150 and len(market) < 10:
