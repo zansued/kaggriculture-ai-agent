@@ -109,6 +109,24 @@ depois libera o tile para wheat. **A base wheat-heavy combina os três.**
 | **Transformação FITA: PASS→PLANT + 160 BUY_SEED** | ❌ 1-10 (mean -33.238) — sementes extras gastam/deslocam ordens |
 | **Overlay runtime: wheat_replant** (PASS→PLANT só se semente+tile vazio) | ❌ 0-12 (mean -4.096) |
 | **hybrid_expand** (fita FarmBrain NW + reativo NE) | ❌ ~2k — fita do FarmBrain não generaliza entre seeds (overfit) |
+| FarmBrain + terra + wheat-heavy forçado (max_wheat 60) | ❌ 0-8 (mean -15.470), reward 38.6k | |
+
+## 8b. INSIGHT ECONÔMICO CRÍTICO (26/08) — por que "mais terra" falha
+
+Análise FarmBrain baseline vs +terra (seed 1):
+- **baseline (25 tiles)**: d25 money=52.9k, 12 strawberry, 9 COW.
+- **+terra (75 tiles)**: d25 money=23.1k, **19 strawberry**, q=3.
+
+O FarmBrain+terra produz MAIS strawberry mas reward MENOR → **mais produção premium CRASHA o preço** (mercado T pequeno). O problema não é coordenação — é ECONOMIA: a terra extra não deve produzir strawberry/melon (crash), deve produzir WHEAT (T=400, absorve volume).
+
+PORÉM: FarmBrain+terra com max_wheat=60 TAMBÉM falha (0-8, 38.6k). Por quê? **Wheat barato na terra extra não compensa se a PRODUTIVIDADE POR TILE for baixa.** O CropDusta tem ~36 wheat tiles (mesmo que o v6), mas produz 2.5× mais wheat por tile (2272 vs 856) via ROTAÇÃO + FERTILIZAÇÃO.
+
+**A vantagem do CropDusta = produtividade por tile (rotação ~2.5×), NÃO escala.**
+
+⇒ A Fase 3 precisa de um coordenador que:
+1. Mantenha strawberry/melon premium LIMITADO (para não crashar).
+2. Produza wheat com ROTAÇÃO RÁPIDA (colher cedo + replantar imediatamente) e FERTILIZAÇÃO (yield 6 vs 4) nos ~36-40 tiles de wheat.
+3. Escale para 100 tiles apenas com wheat de alta rotação no excedente.
 
 **Conclusão:** nem overlay nem modificação pontual da fita Moon alcançam a
 economia wheat-heavy. O Moon é um ótimo local de coordenação rígida — qualquer
