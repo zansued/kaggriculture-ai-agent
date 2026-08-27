@@ -105,6 +105,10 @@ depois libera o tile para wheat. **A base wheat-heavy combina os três.**
 | Overlay `buy_land3` (mais terra cedo) | ⚖️ neutro (sem efeito) |
 | **Transformação FITA: PASS→FERTILIZE** (391 PASS sobre plantas não fertilizadas) | ❌ 1-10 (mean -31.115) — mesmo converter PASS (aparentemente inofensivo) quebra o reward |
 | FarmBrain + terra + clone_quadrant | ❌ 0-8 (mean -15.230) — coordenador greedy NÃO escala, mesmo clonando layout |
+| **Transformação FITA: PASS→PLANT WHEAT** (replantio imediato pós-colheita, 28 casos d4-22) | ❌ 1-8 (mean -1.353) — quase neutro mas negativo |
+| **Transformação FITA: PASS→PLANT + 160 BUY_SEED** | ❌ 1-10 (mean -33.238) — sementes extras gastam/deslocam ordens |
+| **Overlay runtime: wheat_replant** (PASS→PLANT só se semente+tile vazio) | ❌ 0-12 (mean -4.096) |
+| **hybrid_expand** (fita FarmBrain NW + reativo NE) | ❌ ~2k — fita do FarmBrain não generaliza entre seeds (overfit) |
 
 **Conclusão:** nem overlay nem modificação pontual da fita Moon alcançam a
 economia wheat-heavy. O Moon é um ótimo local de coordenação rígida — qualquer
