@@ -26,7 +26,7 @@ PARAMS = {
     "quadrants": 2,             # NW + NE
     "wheat_target": 40,         # tiles de wheat simultâneos
     "hands_target": 8,
-    "fert_buy_price": 40,       # comprar FERTILIZER se preço <= este
+    "fert_buy_price": 80,       # comprar FERTILIZER se preço <= este
     "sell_wheat_from": 4,
     "wheat_reserve": 10,
 }
@@ -123,22 +123,37 @@ class WheatCell:
                     n_wheat += 1  # reserva o tile para wheat
                 target_tiles.append((x, y, act))
         # ordena por prioridade: WATER/HARVEST (sobrevivência) > FERTILIZE > PLANT
-        prio = {"HARVEST": 0, "WATER": 1, "FERTILIZE": 2, "PLANT": 3}
+        prio = {"HARVEST": 0, "WATER": 1, "PICKUP_FERT": 1.5, "FERTILIZE": 2, "PLANT": 3}
         target_tiles.sort(key=lambda tt: prio.get(tt[2][0], 9))
 
         # 2. atribuir units (farmer + hands) aos alvos
         farmer_pos = tuple(farm.get("farmer", [4, 4]))
         hands_pos = [tuple(h) for h in (farm.get("hands") or [])]
+        invs = private.get("inventories") or [{}]
         units = [(0, farmer_pos)] + [(i + 1, hands_pos[i]) for i in range(len(hands_pos))]
         cmds = {0: ["PASS"]}
         for i in range(len(hands_pos)):
             cmds[i + 1] = ["PASS"]
         assigned = set()
+
+        # 2a. Se há fert no shed e nenhum unit carrega fert, adiciona PICKUP_FERT
+        # (alvo = shed) com alta prioridade — um unit vai buscar fert.
+        n_carry_fert = sum(1 for inv in invs if int((inv or {}).get("FERTILIZER", 0) or 0) > 0)
+        shed_fert = int(shed.get("FERTILIZER", 0) or 0)
+        if shed_fert > 0 and n_carry_fert == 0 and any(True for t in target_tiles if t[2][0] == "FERTILIZE"):
+            target_tiles.insert(0, (4, 4, ("PICKUP_FERT",)))  # vai ao shed buscar fert
+
         for x, y, act in target_tiles:
             best = None
             best_d = 999
             for idx, pos in units:
                 if idx in assigned:
+                    continue
+                # FERTILIZE exige unit com fert no inventário
+                if act[0] == "FERTILIZE" and int((invs[idx] or {}).get("FERTILIZER", 0) or 0) <= 0:
+                    continue
+                # PICKUP_FERT exige unit SEM fert
+                if act[0] == "PICKUP_FERT" and int((invs[idx] or {}).get("FERTILIZER", 0) or 0) > 0:
                     continue
                 d = self._manhattan(pos, (x, y))
                 if d < best_d:
@@ -153,6 +168,8 @@ class WheatCell:
                     cmds[idx] = ["PLANT", act[1]]
                 elif act[0] == "FERTILIZE":
                     cmds[idx] = ["FERTILIZE"]
+                elif act[0] == "PICKUP_FERT":
+                    cmds[idx] = ["PICKUP", "FERTILIZER", 5]
                 elif act[0] == "HARVEST":
                     cmds[idx] = ["HARVEST"]
                 else:
