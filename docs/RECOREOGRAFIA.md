@@ -104,3 +104,14 @@ sweep_coreografia.py    # validação paramétrica (n_hands, rampa, zonas)
 Overlays de HIRE/movimento falham porque operam DEPOIS da fita (não conseguem
 re-posicionar hands sem conflitar com a coreografia existente). A fita nova é a
 única forma de coordenar N hands desde o planejamento.
+
+## Resultado do Passo 3 (31/08) — Fase D ENCERRADA
+- gen_coreografia.py: hands extras de zona (colheita) + HIRE rampa.
+  - Extras índices 8-12: 0-24 (sobrepôs hands da fita).
+  - Extras índices 13+: 0-24 (mean -127.714) — reward NEGATIVO.
+- CAUSA: custo de HIRE (fib até 14 hands ~$986/dia) > produção extra da colheita.
+- DESCOBERTA: o HIRE dos tops (591) é CONSEQUÊNCIA da maior produção (~92k reward),
+  não a causa. Nós (~77k) não pagamos o HIRE extra.
+- CONCLUSÃO: Fase D (HIRE) economicamente inviável no estado atual. A evolução
+  real é PRODUÇÃO POR TILE (rotação + adaptatividade), já parcialmente no v18.
+- v18 permanece o campeão.
