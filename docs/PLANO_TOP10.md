@@ -67,3 +67,14 @@ Análise da fita 10c4s do v17: **10 COW** + 4 SHEEP, **BUY_PRODUCT WHEAT 487**,
 - h2h > v17 em W/L (o v17 é o campeão atual).
 - Seeds de referência: 507467650, 1017826910, 2011797993.
 - Meta ELO: > 2500 (próximo passo), depois > 2850 (top 10).
+
+## Resultado 31/08 (Fases testadas)
+- **Fase B (adaptatividade venda)**: ✅ FEITO no v18 (124-20 vs v17, 86%). NOVO CAMPEÃO.
+- **Fase E (CARROT/TOMATO tardio)**: ❌ INVIÁVEL — v17/v18 usam toda a terra (só 2 tiles
+  vazios d15-26). Overlay de plantio tardio 2-10; plantio adaptativo ao preço 2-5.
+- **Fase D (HIRE escalável via overlay)**: ❌ 0-12 (mean -61.492) — overlay quebra a
+  coordenação (hands extras indistinguíveis; HIRE drena dinheiro). Confirmado o doc:
+  HIRE só funciona RE-COREOGRAFANDO a fita (projeto grande).
+- **Gap real do v18 vs tops**: ~12-15k reward (seeds 1017826910, 2011797993) = ~1300 ELO.
+  A diferença é PRODUÇÃO (tops usam 591-602 HIRE vs nossos 277) — a Fase D real é
+  re-coreografia da fita (dias de engenharia).
