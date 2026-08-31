@@ -12,16 +12,23 @@ do MESMO preço de partida reagindo em tempo real. Nosso v17 = fita fixa 719-aç
 
 ## 5 mudanças estruturais (por impacto/risco)
 
-### Fase A — Rebanho COW grande + compra de WHEAT (MAIOR alavanca)
-- **O que**: elevar COW para 10-12 + comprar WHEAT (BUY_PRODUCT) d0-13 para feed,
-  permitindo rebanho maior sem plantar tanto WHEAT. Padrão de TODOS os tops.
-- **Por que**: MILK é o motor (preço alto, demanda). Mais COW = mais MILK = mais
-  receita estável. WHEAT comprado é mais barato que o plantio (libera tiles/hands).
+### DIAGNÓSTICO REFINADO (31/08): o Moon JÁ tem os padrões dos tops
+Análise da fita 10c4s do v17: **10 COW** + 4 SHEEP, **BUY_PRODUCT WHEAT 487**,
+**HIRE 277**, **482 ordens SELL** (fracionado), SELL WHEAT 856 / FERT 2932 / MILK 279.
+⇒ Rebanho grande, compra de WHEAT, HIRE e vendas fracionadas JÁ existem na fita.
+**A lacuna real é ADAPTATIVIDADE** (reagir ao preço real da partida), não produção.
+
+### Fase A — ADAPTATIVIDADE de venda NA BASE (agora a MAIOR alavanca)
+- **O que**: substituir o glut-guard FIXO (base estática) por decisão baseada na
+  série de preços REAL da partida (média recente + momentum + piso dinâmico).
+  O overlay adaptativo deu 5-7 vs v17 (quase neutro) porque pós-processa tarde e
+  não influencia o plantio. NA BASE integrado decide vendas com histórico completo.
 - **Como**: modificar `research/public/moon_v17_goose.py`:
-  - Fita: +BUY_ANIMAL COW (até 10-12), pastagens extras.
-  - Market: BUY_PRODUCT WHEAT quando money alto e preço WHEAT baixo.
-  - Fita: redistribuir plantio (menos WHEAT plantado, mais COW).
-- **Risco**: médio. Mexe no equilíbrio da fita (como o v17 GOOSE).
+  - Manter histórico de preços por item no estado do agente.
+  - O _glut_guard (embutido) usa base dinâmica (média recente) + momentum:
+    momentum negativo => vender antes do crash; positivo => segurar p/ pico.
+  - Vender em FRAÇÕES (lotes 3-16) como os tops, não dump em bloco.
+- **Risco**: médio. Mexe na lógica de venda da base (não na fita de produção).
 - **Validação**: h2h vs v17 (24-36 seeds, 2 lados). Critério: W/L > 50%.
 
 ### Fase B — Adaptatividade de venda (base dinâmica + momentum) NA BASE
