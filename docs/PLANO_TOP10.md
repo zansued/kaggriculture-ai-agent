@@ -78,3 +78,11 @@ Análise da fita 10c4s do v17: **10 COW** + 4 SHEEP, **BUY_PRODUCT WHEAT 487**,
 - **Gap real do v18 vs tops**: ~12-15k reward (seeds 1017826910, 2011797993) = ~1300 ELO.
   A diferença é PRODUÇÃO (tops usam 591-602 HIRE vs nossos 277) — a Fase D real é
   re-coreografia da fita (dias de engenharia).
+
+## Fase D (31/08, iterações) — overlay definitivamente inviável
+- manager_v1 (HIRE 12 + mexer em todos PASS): 0-12 (mean -61.492).
+- manager_v2 (HIRE 10 + só hands no shed): 0-12 (mean -87.785).
+- Transformação fita PASS->WATER (29 casos): 2-2 (neutro).
+- CONCLUSÃO: HIRE escalável exige RE-COREOGRAFAR a fita (projeto de engenharia,
+  dias). Qualquer overlay de HIRE/movimento quebra a coordenação. v18 permanece
+  campeão; Fase D fica como projeto dedicado.
