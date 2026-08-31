@@ -77,3 +77,11 @@ basta (já medido: perde localmente); o gap é comportamento reativo ao preço d
   + momentum) e **BUY_PRODUCT WHEAT cedo**.
 - Candidato de maior ganho potencial (se a base Moon for trocável): rebanho GOOSE+EGG e
   CARROT/TOMATO tardio — exigem mudança estrutural, não overlay.
+
+## 7. Testes 31/08 (overlays vs v17) — todos reprovados
+- **sweep_adaptive.py**: glut-guard adaptativo (base dinâmica + momentum) → 5-7 vs v17
+  (mean +~250-280 em todas as variações). W/L negativo = ELO negativo.
+- **Overlay CARROT/TOMATO tardio** (plantio em tiles vazios d15-26 + BUY_SEED) → 2-10 vs v17
+  (mean -321). Sementes gastam dinheiro sem retorno; PASS convertidos interferem.
+- CONFIRMAÇÃO FINAL: v17 é ótimo local apertado, como v6. **Nenhum overlay pontual vence.**
+  A lacuna para tops exige mudança ESTRUTURAL na base (como o v17 fez com GOOSE), não overlay.
