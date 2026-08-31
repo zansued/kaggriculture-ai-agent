@@ -11,6 +11,10 @@ decisão baseada na série de preços REAL da partida:
 
 Referência: docs/PLANO_TOP10.md (Fase B), docs/TOPS_ADAPTIVE_27AGO.md.
 
+VALIDAÇÃO (31/08, seeds 1-72, 2 lados = 144 jogos):
+  v18 124-20 vs v17 (86.1% dos não-empates, mean_d +514).
+  Maior avanço desde v6->v17. Submetido como NOVO CAMPEÃO (31/08).
+
 Output: submissions/hybrid_v18/main.py
 Usage:   python build_hybrid_v18.py
 """
