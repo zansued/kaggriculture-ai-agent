@@ -94,3 +94,12 @@ Análise da fita 10c4s do v17: **10 COW** + 4 SHEEP, **BUY_PRODUCT WHEAT 487**,
   mas perde frequência => ELO negativo.
 - CONCLUSÃO: venda adaptativa chegou ao limite. Próxima dimensão = PRODUÇÃO
   (plantio ao preço / fertilização adaptativa) NA BASE, não overlay.
+
+## 01/09 — fertilização adaptativa refutada
+- PASS->FERTILIZE nos wheats (136 casos) + manutenção das vendas: 2-9 vs v19
+  (mean -4804). Consistente com fert_farm (0-12) e PASS->FERTILIZE v6 (-31k).
+- CAUSA: o fert vendido vale mais que o yield extra capturado (o Moon não vende
+  wheat em volume como o CropDusta). Fertilizar NÃO compensa no Moon.
+- CONCLUSÃO: v19 (glut-guard por item) é o ótimo da venda. Produção (fert) esgotada.
+  Próximas dimensões possíveis: rebanho adaptativo ao preço (na base), compra
+  adaptativa de WHEAT (timing por preço), ou aceitar v19 como campeão.
