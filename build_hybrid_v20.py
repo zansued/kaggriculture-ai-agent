@@ -1,24 +1,20 @@
-"""Build do bundle single-file do HÍBRIDO V20 (TOMATO tardio, sobre o V17):
-Moon V56 (com _v35 GOOSE expandido + _v17_feed_guard) + overlays do mix +
-glut-guard v17 (inalterado) + _tomato_late (planta TOMATO d10-d16).
+"""Build do bundle single-file do HÍBRIDO V18 (adaptativo): Moon V56 (GOOSE
+expandido do v17) + overlays + GLUT-GUARD ADAPTATIVO.
 
-V17 = campeão. Análise empírica (29/08): o v17 já planta CARROT tardio
-(d22-27), mas NÃO planta NADA de TOMATO. Os tops (tetsuya/Blu3s) plantam
-TOMATO d11-12 e vendem d21-24; o preço do TOMATO sobe 60 -> 147 no fim.
+Fase B do PLANO_TOP10.md: substituir o glut-guard FIXO (base estática) por
+decisão baseada na série de preços REAL da partida:
+  - dyn_base[item] = média dos últimos N preços (janela ~1 dia).
+  - momentum = (preço atual - média anterior) / média anterior.
+  - momentum NEGATIVO => vender mais cedo (floor menor, captura antes do crash).
+  - momentum POSITIVO => segurar mais (floor maior, espera o pico).
+  - Vendas FRACIONADAS (lote máx ~16) como os tops — suaviza impacto no preço.
 
-Mecânica: TOMATO seed=50, first_yield d8, colheita contínua (interval 1d),
-max_yield=4, ongoing. Plantado d10-16 -> matura d18-24 -> colhe até o d29
-com o preço subindo.
+Referência: docs/PLANO_TOP10.md (Fase B), docs/TOPS_ADAPTIVE_27AGO.md.
 
-Implementação (segura para a coordenação do Moon):
-- _tomato_late TROCA até _TOM_MAX ordens PLANT WHEAT por PLANT TOMATO nos
-  dias 10-16, mantendo a MESMA unidade/tile — não desloca hands nem quebra
-  o plano de movimento (o hand vai ao mesmo tile e planta TOMATO).
-- Garante BUY_SEED TOMATO no market (custo 50) quando vai trocar.
-- Limite de 4 tiles de TOMATO p/ não comprometer o FEED dos animais (o Moon
-  mantém ~40+ tiles de wheat; 4 a menos é ~10%).
+VALIDAÇÃO (31/08, seeds 1-72, 2 lados = 144 jogos):
+  v18 124-20 vs v17 (86.1% dos não-empates, mean_d +514).
+  Maior avanço desde v6->v17. Submetido como NOVO CAMPEÃO (31/08).
 
-Validado (a preencher): v20 vs v17, h2h 2 lados, seeds 1-36.
 Output: submissions/hybrid_v20/main.py
 Usage:   python build_hybrid_v20.py
 """
@@ -34,8 +30,6 @@ OUT = ROOT / "submissions" / "hybrid_v20" / "main.py"
 _MIX_OVERPRELUDE = '''\
 # ---------------------------------------------------------------------------
 # Overlays do mix_agent (validados) — injetados sobre a base Moon.
-# _mature_opp_front_run (vende quando produção do oponente está madura) e
-# _sell_first (order-slot: premium sells antes, piorando o preço do oponente).
 # ---------------------------------------------------------------------------
 _OPP_THRESH = {"STRAWBERRY": 4, "MELON": 2, "MILK": 4, "WOOL": 3}
 _OPP_MAX_DAY = {"STRAWBERRY": 10, "MELON": 12}
@@ -93,7 +87,8 @@ def _sell_first(action, obs, step):
 
 
 # ---------------------------------------------------------------------------
-# V5 glut-guard (ótimo local do v17) — INALTERADO.
+# V18: _glut_guard ADAPTATIVO — decisão de venda pela série de preços real.
+# Substitui o glut-guard fixo do v17 (base estática + floor fixo).
 # ---------------------------------------------------------------------------
 _GBASE = {"WHEAT": 25, "CARROT": 35, "TOMATO": 60, "STRAWBERRY": 120,
           "MELON": 250, "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100}
@@ -101,13 +96,19 @@ _GRISERS = ("WHEAT", "CARROT", "TOMATO")
 _GHOLD = 0.5
 _GRISE_MULT = 1.3
 _GDUMP = ("MILK", "WOOL", "MELON", "STRAWBERRY")
-_GD_FLOOR = {"MILK": 0.45, "WOOL": 0.45, "MELON": 0.40, "STRAWBERRY": 0.40}
-_GSTART = 250
-_GSTOP = 650
+_GSTART = 200
+_GSTOP = 680
 
+# Parâmetros POR ITEM (v19): cada produto tem dinâmica de preço própria.
+# MELON crasha d10; MILK pico curto d12-14; WOOL recupera no fim; STRAWB declina.
+_ITEM_CFG = {
+    "MILK":       {"floor": 0.42, "shift": 0.10, "window": 10, "lote": 16, "mom": 0.06},
+    "WOOL":       {"floor": 0.50, "shift": 0.15, "window": 24, "lote": 12, "mom": 0.04},
+    "MELON":      {"floor": 0.35, "shift": 0.16, "window": 8, "lote": 12, "mom": 0.08},
+    "STRAWBERRY": {"floor": 0.38, "shift": 0.10, "window": 12, "lote": 16, "mom": 0.05},
+}
 
-def _floor_of(item):
-    return _GD_FLOOR.get(item, 0.45) if isinstance(_GD_FLOOR, dict) else _GD_FLOOR
+_PHIST = {}           # seat -> {item -> [preços]}
 
 
 def _glut_guard(action, obs, step):
@@ -118,6 +119,17 @@ def _glut_guard(action, obs, step):
         return action
     prices = ((obs.get("market") or {}).get("prices") or {})
     shed = ((obs.get("private") or {}).get("shed") or {})
+    seat = int((obs or {}).get("index", 0) or 0)
+
+    # atualiza histórico de preços (por item premium)
+    hist = _PHIST.setdefault(seat, {})
+    for item, c in _ITEM_CFG.items():
+        p = float(prices.get(item, 0) or 0)
+        if p > 0:
+            hist.setdefault(item, []).append(p)
+            if len(hist[item]) > c["window"]:
+                hist[item] = hist[item][-c["window"]:]
+
     new_market = []
     for o in market:
         if isinstance(o, list) and len(o) >= 3 and o[0] == "SELL" and o[1] in _GBASE:
@@ -127,68 +139,42 @@ def _glut_guard(action, obs, step):
                 continue
             price = float(prices.get(item, 0) or 0)
             base = _GBASE[item]
+
             if item in _GRISERS and price > 0 and price < base * _GRISE_MULT:
-                keep = max(1, int(qty * _GHOLD))
-                new_market.append(["SELL", item, keep])
-            elif item in _GDUMP and price >= base * _floor_of(item):
-                avail = int(shed.get(item, 0) or 0)
-                if avail > 0:
-                    new_market.append(["SELL", item, max(qty, avail)])
+                new_market.append(["SELL", item, max(1, int(qty * _GHOLD))])
+                continue
+
+            if item in _ITEM_CFG:
+                c = _ITEM_CFG[item]
+                h = hist.get(item, [])
+                if len(h) < 5:
+                    floor = c["floor"]
                 else:
-                    new_market.append(o)
-            else:
-                new_market.append(o)
+                    dyn_base = sum(h) / len(h)
+                    prev = h[:max(1, len(h) - 4)]
+                    prev_base = sum(prev) / len(prev)
+                    momentum = (price - prev_base) / max(0.01, prev_base)
+                    floor = c["floor"]
+                    if momentum < -c["mom"]:
+                        floor = max(0.12, floor - c["shift"])
+                    elif momentum > c["mom"]:
+                        floor = min(0.75, floor + c["shift"])
+                    base = dyn_base
+                if price >= base * floor:
+                    avail = int(shed.get(item, 0) or 0)
+                    if avail > 0:
+                        lote = min(max(qty, avail), c["lote"])
+                        new_market.append(["SELL", item, lote])
+                    else:
+                        new_market.append(o)
+                else:
+                    new_market.append(["SELL", item, max(1, int(qty * 0.5))])
+                continue
+
+            new_market.append(o)
         else:
             new_market.append(o)
     action["market"] = new_market[:10]
-    return action
-
-
-# ---------------------------------------------------------------------------
-# V20: _tomato_late — planta TOMATO d10-d16 trocando alguns PLANT WHEAT do
-# próprio Moon (mesma unidade/tile, sem deslocar coordenação). Garante seed.
-# ---------------------------------------------------------------------------
-_TOM_DAY_LO = 10
-_TOM_DAY_HI = 16
-_TOM_MAX = 4          # máx tiles de TOMATO no total (protege FEED do wheat)
-_TOM_SEED_MIN = 1
-
-
-def _tomato_late(action, obs, step):
-    day = int(obs.get("day", 0) or 0)
-    if not (_TOM_DAY_LO <= day <= _TOM_DAY_HI):
-        return action
-    farm = obs.get("farms", [{}])[0]
-    tiles = farm.get("tiles", []) or []
-    n_tom = sum(1 for row in tiles for t in row
-                if isinstance(t, dict) and t.get("kind") == "PLANT" and t.get("crop") == "TOMATO")
-    if n_tom >= _TOM_MAX:
-        return action
-
-    # troca PLANT WHEAT -> PLANT TOMATO (nas ordens farmer + hands)
-    farmer = list(action.get("farmer") or ["PASS"])
-    hands = [list(h or ["PASS"]) for h in (action.get("hands") or [])]
-    changed = False
-    for order in [farmer, *hands]:
-        if n_tom >= _TOM_MAX:
-            break
-        if isinstance(order, list) and len(order) >= 2 and order[0] == "PLANT" and order[1] == "WHEAT":
-            order[1] = "TOMATO"
-            n_tom += 1
-            changed = True
-    if changed:
-        action["farmer"] = farmer
-        action["hands"] = hands
-
-    # garante pelo menos 1 seed de TOMATO no mercado
-    seeds = ((obs.get("private") or {}).get("seeds") or {})
-    if int(seeds.get("TOMATO", 0) or 0) < _TOM_SEED_MIN:
-        market = list(action.get("market") or [])
-        has = any(isinstance(m, list) and len(m) >= 2 and m[0] == "BUY_SEED" and m[1] == "TOMATO"
-                  for m in market)
-        if not has and len(market) < 10:
-            market.append(["BUY_SEED", "TOMATO", 1])
-            action["market"] = market[:10]
     return action
 
 
@@ -198,7 +184,6 @@ def agent(obs, config=None):
     _mature_opp_front_run(action, obs, step)
     action = _sell_first(action, obs, step)
     action = _glut_guard(action, obs, step)
-    action = _tomato_late(action, obs, step)
     return action
 '''
 
@@ -217,12 +202,12 @@ def build() -> None:
 
     header = f'''"""hybrid_v20 - single-file Kaggle submission bundle.
 
-Moon V56 (com _v35 GOOSE expandido + _v17_feed_guard) + overlays do mix +
-glut-guard v17 (inalterado) + _tomato_late (planta TOMATO d10-d16 trocando
-4 PLANT WHEAT do próprio Moon). Captura a valorização do TOMATO no fim.
+Moon V56 (GOOSE v17) + overlays do mix + glut-guard ADAPTATIVO:
+  - base dinamica (media recente) + momentum para decidir dump/hold.
+  - vendas FRACIONADAS (lotes ate 16) como os tops.
+  - janela 200-680.
 
-Built by build_hybrid_v20.py. Self-contained: embute moon_v17_goose.py
-(zlib+base85) e injeta os overlays inline.
+Built by build_hybrid_v20.py. Self-contained.
 """
 from __future__ import annotations
 
