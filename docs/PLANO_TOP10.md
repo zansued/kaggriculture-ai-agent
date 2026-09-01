@@ -86,3 +86,11 @@ Análise da fita 10c4s do v17: **10 COW** + 4 SHEEP, **BUY_PRODUCT WHEAT 487**,
 - CONCLUSÃO: HIRE escalável exige RE-COREOGRAFAR a fita (projeto de engenharia,
   dias). Qualquer overlay de HIRE/movimento quebra a coordenação. v18 permanece
   campeão; Fase D fica como projeto dedicado.
+
+## 01/09 — glut-guard adaptativo esgotado (v19 é o ótimo)
+- v19 (média + parâmetros por item): campeão (62% vs v18, mean +22, 144 jogos).
+- v20 (janelas curtas): 50-42 vs v19 (54.3%, mean +1) — MARGINAL, não robusto.
+- peak (referência = pico recente): 32-36 vs v19 (47.1%, mean +45) — ganha margem
+  mas perde frequência => ELO negativo.
+- CONCLUSÃO: venda adaptativa chegou ao limite. Próxima dimensão = PRODUÇÃO
+  (plantio ao preço / fertilização adaptativa) NA BASE, não overlay.
