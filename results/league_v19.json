@@ -1,0 +1,594 @@
+{
+ "champ": "C:\\Users\\guilherme.sa\\AppData\\Roaming\\CherryStudio\\Data\\Agents\\w-default\\kaggriculture-agent\\submissions/hybrid_v19/main.py",
+ "seeds": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6
+ ],
+ "rows": [
+  {
+   "key": "v18",
+   "label": "v18 (sell-adapt prev)",
+   "w": 1,
+   "l": 3,
+   "t": 8,
+   "n": 12,
+   "mean_d": -7.0,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 106050.0,
+     "opp_r": 106948.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 106956.0,
+     "opp_r": 106046.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 97064.0,
+     "opp_r": 97064.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 97064.0,
+     "opp_r": 97064.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 134428.0,
+     "opp_r": 134476.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 134428.0,
+     "opp_r": 134476.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 78894.0,
+     "opp_r": 78894.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 78894.0,
+     "opp_r": 78894.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 86971.0,
+     "opp_r": 86971.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 86971.0,
+     "opp_r": 86971.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 144992.0,
+     "opp_r": 144992.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 144992.0,
+     "opp_r": 144992.0
+    }
+   ]
+  },
+  {
+   "key": "moon",
+   "label": "moon_v56 (mesma familia)",
+   "w": 12,
+   "l": 0,
+   "t": 0,
+   "n": 12,
+   "mean_d": 3208.4,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 106775.0,
+     "opp_r": 105158.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 107760.0,
+     "opp_r": 104306.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 97083.0,
+     "opp_r": 92939.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 97083.0,
+     "opp_r": 92939.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 135472.0,
+     "opp_r": 133316.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 135472.0,
+     "opp_r": 133316.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 78629.0,
+     "opp_r": 73652.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 78629.0,
+     "opp_r": 73652.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 87458.0,
+     "opp_r": 83167.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 87458.0,
+     "opp_r": 83167.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 145258.0,
+     "opp_r": 144111.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 145258.0,
+     "opp_r": 144111.0
+    }
+   ]
+  },
+  {
+   "key": "soil",
+   "label": "soil_v19 (rota modal)",
+   "w": 10,
+   "l": 2,
+   "t": 0,
+   "n": 12,
+   "mean_d": 9936.8,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 113946.0,
+     "opp_r": 104220.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 123948.0,
+     "opp_r": 115320.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 99657.0,
+     "opp_r": 99905.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 99582.0,
+     "opp_r": 100005.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 111842.0,
+     "opp_r": 81995.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 111445.0,
+     "opp_r": 82199.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 40669.0,
+     "opp_r": 33009.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 40846.0,
+     "opp_r": 32818.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 96518.0,
+     "opp_r": 92665.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 96292.0,
+     "opp_r": 92203.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 156487.0,
+     "opp_r": 148849.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 159728.0,
+     "opp_r": 148531.0
+    }
+   ]
+  },
+  {
+   "key": "mix",
+   "label": "mix_single (market-flow)",
+   "w": 12,
+   "l": 0,
+   "t": 0,
+   "n": 12,
+   "mean_d": 21308.8,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 100374.0,
+     "opp_r": 79209.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 101844.0,
+     "opp_r": 77402.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 89793.0,
+     "opp_r": 71480.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 94033.0,
+     "opp_r": 72965.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 91113.0,
+     "opp_r": 78434.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 88042.0,
+     "opp_r": 72567.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 101799.0,
+     "opp_r": 79010.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 101944.0,
+     "opp_r": 79020.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 124668.0,
+     "opp_r": 102495.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 124838.0,
+     "opp_r": 102637.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 96466.0,
+     "opp_r": 72425.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 99371.0,
+     "opp_r": 70936.0
+    }
+   ]
+  },
+  {
+   "key": "c27",
+   "label": "c27 (clone front-run)",
+   "w": 12,
+   "l": 0,
+   "t": 0,
+   "n": 12,
+   "mean_d": 23507.1,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 100581.0,
+     "opp_r": 80290.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 102216.0,
+     "opp_r": 78410.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 90057.0,
+     "opp_r": 70952.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 94298.0,
+     "opp_r": 73231.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 65294.0,
+     "opp_r": 51822.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 88434.0,
+     "opp_r": 49753.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 101875.0,
+     "opp_r": 80077.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 102025.0,
+     "opp_r": 80043.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 125160.0,
+     "opp_r": 103645.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 122405.0,
+     "opp_r": 95117.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 101599.0,
+     "opp_r": 75313.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 101611.0,
+     "opp_r": 74817.0
+    }
+   ]
+  },
+  {
+   "key": "purearch",
+   "label": "purearch (baseline fita)",
+   "w": 12,
+   "l": 0,
+   "t": 0,
+   "n": 12,
+   "mean_d": 20602.8,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 100537.0,
+     "opp_r": 80826.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 102142.0,
+     "opp_r": 79013.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 90303.0,
+     "opp_r": 71561.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 94226.0,
+     "opp_r": 73251.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 90928.0,
+     "opp_r": 79617.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 87779.0,
+     "opp_r": 73438.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 101711.0,
+     "opp_r": 80193.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 101832.0,
+     "opp_r": 80196.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 125048.0,
+     "opp_r": 103753.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 125162.0,
+     "opp_r": 103888.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 101566.0,
+     "opp_r": 75218.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 101633.0,
+     "opp_r": 74679.0
+    }
+   ]
+  },
+  {
+   "key": "trace",
+   "label": "trace_10c4s",
+   "w": 12,
+   "l": 0,
+   "t": 0,
+   "n": 12,
+   "mean_d": 20608.4,
+   "games": [
+    {
+     "seed": 1,
+     "side": 0,
+     "champ_r": 92827.0,
+     "opp_r": 76924.0
+    },
+    {
+     "seed": 1,
+     "side": 1,
+     "champ_r": 94420.0,
+     "opp_r": 75737.0
+    },
+    {
+     "seed": 2,
+     "side": 0,
+     "champ_r": 91066.0,
+     "opp_r": 77807.0
+    },
+    {
+     "seed": 2,
+     "side": 1,
+     "champ_r": 91765.0,
+     "opp_r": 81019.0
+    },
+    {
+     "seed": 3,
+     "side": 0,
+     "champ_r": 89490.0,
+     "opp_r": 68793.0
+    },
+    {
+     "seed": 3,
+     "side": 1,
+     "champ_r": 69145.0,
+     "opp_r": 48825.0
+    },
+    {
+     "seed": 4,
+     "side": 0,
+     "champ_r": 78526.0,
+     "opp_r": 56890.0
+    },
+    {
+     "seed": 4,
+     "side": 1,
+     "champ_r": 78431.0,
+     "opp_r": 57100.0
+    },
+    {
+     "seed": 5,
+     "side": 0,
+     "champ_r": 96266.0,
+     "opp_r": 79642.0
+    },
+    {
+     "seed": 5,
+     "side": 1,
+     "champ_r": 86483.0,
+     "opp_r": 68037.0
+    },
+    {
+     "seed": 6,
+     "side": 0,
+     "champ_r": 112089.0,
+     "opp_r": 77495.0
+    },
+    {
+     "seed": 6,
+     "side": 1,
+     "champ_r": 111379.0,
+     "opp_r": 76317.0
+    }
+   ]
+  }
+ ]
+}
