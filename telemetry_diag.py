@@ -25,6 +25,15 @@ ANIM = {
     "SHEEP": {"first": 6, "interval": 3, "cap": 6, "cost": 500},
 }
 
+# Crops do engine. ongoing=True => multi-colheita (mantem yield; so colhe no teto).
+CROP = {
+    "WHEAT":      {"first": 2, "max_yield": 6, "ongoing": False},
+    "CARROT":     {"first": 2, "max_yield": 4, "ongoing": False},
+    "TOMATO":     {"first": 8, "max_yield": 4, "ongoing": True},
+    "STRAWBERRY": {"first": 10, "max_yield": 4, "ongoing": True},
+    "MELON":      {"first": 10, "max_yield": 6, "ongoing": False},
+}
+
 
 def _fib(n):
     """fib indexado como no engine: _fib(0)=1, _fib(1)=1, _fib(2)=2, _fib(3)=3..."""
@@ -105,6 +114,17 @@ class Tele:
 
         # --- slack de expansao diario ---
         self.daily = {}              # day -> registro (caixa, rebanho, precos, hires, buys)
+
+        # --- movimento estrutural (ida e volta da mao de obra) ---
+        self.distance_traveled = 0   # manhattan total percorrido por farmer+hands
+        self.shed_visits = 0         # acoes PICKUP/DROP (worker junto ao shed)
+        self.drops = 0
+        self.stand_ignored = 0       # MOVE/PASS saindo de tile com trabalho pendente
+        self.ignored_type = Counter()   # harvest/water/feed/care/harvest_animal
+        self.ignored_cmd = Counter()    # move/pass
+        self.work_under_feet = 0     # HARVEST/FEED/CARE/WATER feito com trabalho no tile
+        self.done_type = Counter()   # trabalho feito por tipo (p/ razao por tipo)
+        self._prev_pos = {}          # worker -> posicao no obs anterior (mesmo dia)
 
     def _is_pasture(self, cell):
         return isinstance(cell, dict) and cell.get("kind") == "PASTURE" and cell.get("animal")
@@ -225,6 +245,88 @@ class Tele:
             d[key] = cost
         return d
 
+    def _tile_work(self, tile, day):
+        """Trabalho pendente 'sob os pes' num tile (ou None).
+
+        Refinado p/ reduzir falso positivo:
+        - PLANT one-shot com yield>0 => harvest. ongoing => harvest so no teto
+          (yield >= max_yield). Crescendo e nao regada hoje e ainda na janela
+          (day - planted < first_yield_day) => water.
+        - Animal: yield>0 => harvest_animal (evita clip de producao futura).
+          feed so quando CRITICO: consecutive_unfed>=1 (risco de fuga) ou a
+          noite de hoje e produtiva (precisa feed p/ realizar producao+bonus).
+        """
+        if not isinstance(tile, dict):
+            return None
+        if tile.get("kind") == "PLANT":
+            c = tile.get("crop")
+            cd = CROP.get(c) if c else None
+            y = int(tile.get("yield_units", 0) or 0)
+            if cd:
+                if y > 0:
+                    if cd["ongoing"]:
+                        return "harvest" if y >= cd["max_yield"] else None
+                    return "harvest"
+                planted = int(tile.get("planted_day", 0) or 0)
+                if not tile.get("watered_today") and (day - planted) < cd["first"]:
+                    return "water"
+            return None
+        if tile.get("animal"):
+            y = int(tile.get("yield_units", 0) or 0)
+            if y > 0:
+                return "harvest_animal"
+            unfed = int(tile.get("consecutive_unfed", 0) or 0)
+            placed = int(tile.get("placed_day", 0) or 0)
+            a = ANIM.get(tile.get("animal"))
+            prod_tonight = False
+            if a:
+                dias = (day + 1) - placed - a["first"]
+                prod_tonight = dias >= 0 and dias % a["interval"] == 0
+            if not tile.get("fed_today") and (unfed >= 1 or prod_tonight):
+                return "feed"
+            return None
+        return None
+
+    def _note_movement(self, obs, act, farm, day):
+        """Mede distancia percorrida e MOVE/PASS que ignoram trabalho no tile
+        onde o worker ja esta (standing-on-work)."""
+        # na virada do dia os hands sao resetados (novo spawn) -> nao medir "teleporte"
+        if self._last_day is not None and day != self._last_day:
+            self._prev_pos = {}
+        acts_farmer = act.get("farmer") if isinstance(act, dict) else None
+        acts_hands = (act.get("hands") if isinstance(act, dict) else None) or []
+        hands_pos = farm.get("hands") or []
+        workers = [("F", farm.get("farmer"), acts_farmer)]
+        workers += [("H%d" % i, hands_pos[i], acts_hands[i] if i < len(acts_hands) else None)
+                    for i in range(len(hands_pos))]
+        for wid, pos, a in workers:
+            if not pos:
+                continue
+            prev = self._prev_pos.get(wid)
+            if prev is not None and self._last_day == day:
+                self.distance_traveled += abs(int(pos[0]) - prev[0]) + abs(int(pos[1]) - prev[1])
+            self._prev_pos[wid] = (int(pos[0]), int(pos[1]))
+            if not (isinstance(a, (list, tuple)) and a):
+                continue
+            cmd = a[0]
+            tile = cell_at(farm, pos)
+            work = self._tile_work(tile, day)
+            if work is None:
+                if cmd in ("HARVEST", "FEED", "CARE", "WATER"):
+                    self.work_under_feet += 1  # trabalho util mesmo sem pendencia detectada
+                continue
+            if cmd in MOVES:
+                self.stand_ignored += 1
+                self.ignored_type[work] += 1
+                self.ignored_cmd["move"] += 1
+            elif cmd == "PASS":
+                self.stand_ignored += 1
+                self.ignored_type[work] += 1
+                self.ignored_cmd["pass"] += 1
+            elif cmd in ("HARVEST", "FEED", "CARE", "WATER"):
+                self.work_under_feet += 1
+                self.done_type[work] += 1
+
     def daily_report(self):
         """Linhas dia a dia: caixa de abertura, rebanho, preco COW, quantos COW
         'cabiam' no caixa (money_open // cow_price), compras e hires do dia."""
@@ -254,6 +356,7 @@ class Tele:
         # --- hires: ordem != hand pago (engine zera hands/hires_today no fim do dia) ---
         day = int(obs.get("day", 0) or 0)
         self._note_daily(obs, farm, day)
+        self._note_movement(obs, act, farm, day)
         if self._last_day is None:
             # primeiro turno do jogo (hands comecam zerados no dia 0)
             self.prev_n_hands = n_hands
@@ -343,6 +446,7 @@ class Tele:
             return
         self.prod += 1
         if cmd == "PICKUP":
+            self.shed_visits += 1
             self.pickup[action[1] if len(action) > 1 else "?"] += 1
             item = action[1] if len(action) > 1 else None
             if item == "WHEAT":
@@ -351,6 +455,9 @@ class Tele:
                     self.wheat_units += int(action[2]) if len(action) > 2 else 1
                 except (TypeError, ValueError):
                     self.wheat_units += 1
+        if cmd == "DROP":
+            self.shed_visits += 1
+            self.drops += 1
         # estado da celula onde a acao age (posicao atual do worker)
         # pos e preenchida fora via _cell_state
 
@@ -426,6 +533,14 @@ class Tele:
             "wheat_units": self.wheat_units,
             "feeds_per_pickup": round(self.feeds / max(1, self.wheat_pickups), 2),
             "care_realization": round(self.care_realized / max(1, self.care), 3),
+            "distance_traveled": self.distance_traveled,
+            "shed_visits": self.shed_visits,
+            "drops": self.drops,
+            "stand_ignored": self.stand_ignored,
+            "ignored_type": dict(self.ignored_type),
+            "ignored_cmd": dict(self.ignored_cmd),
+            "work_under_feet": self.work_under_feet,
+            "done_type": dict(self.done_type),
         }
 
 
@@ -494,11 +609,13 @@ def main():
                       "animal_days", "near_cap_turns", "hire_orders", "successful_hires",
                       "hire_cost", "hired_hand_turns", "prod_nights", "prod_nights_fed",
                       "base_units", "care_consumed", "care_realized", "care_clipped",
-                      "care_lost_no_feed", "prod_clipped_total", "wheat_pickups", "wheat_units"):
+                      "care_lost_no_feed", "prod_clipped_total", "wheat_pickups", "wheat_units",
+                      "distance_traveled", "shed_visits", "drops", "stand_ignored",
+                      "work_under_feet"):
                 agg[k] += s[k]
             for k in ("moves/prod", "pass_share_actions", "feeds_per_pickup", "care_realization"):
                 agg[k] = None  # recomputa depois
-            for k in ("sells", "shed_end"):
+            for k in ("sells", "shed_end", "ignored_type", "ignored_cmd", "done_type"):
                 for item, v in s[k].items():
                     agg["%s:%s" % (k, item)] += v
             print(f"  [{cand} seed {seed}] reward={r0} "
@@ -519,6 +636,19 @@ def main():
         shed_str = " ".join(f"{k[9:]}={agg[k]/n:.0f}" for k in shed_keys if agg[k] > 0)
         care_r = agg["care_realized"] / max(1, agg["care"])
         fpp = agg["feeds"] / max(1, agg["wheat_pickups"])
+        mv_vis = max(1, agg["shed_visits"])
+        ign_str = " ".join(
+            f"{k.split(':', 1)[1]}={agg[k]:.0f}"
+            for k in sorted(k for k in agg if k.startswith("ignored_type:"))
+        )
+        all_types = sorted({
+            k.split(":", 1)[1] for k in agg
+            if k.startswith("ignored_type:") or k.startswith("done_type:")
+        })
+        ratio_str = " ".join(
+            f"{t}:feito={agg.get('done_type:' + t, 0):.0f}/ign={agg.get('ignored_type:' + t, 0):.0f}"
+            for t in all_types
+        )
         print(f"== {cand}: mean_reward={agg['reward']/n:.0f} | "
               f"hand_turns={agg['hand_turns']:.0f} prod={agg['prod']:.0f} "
               f"moves={agg['moves']:.0f} PASS={agg['PASS']:.0f} noact={agg['no_action']:.0f} "
@@ -535,6 +665,11 @@ def main():
               f"base_units={agg['base_units']:.0f} clip_total={agg['prod_clipped_total']:.0f}\n"
               f"    WHEAT pickups={agg['wheat_pickups']:.0f} units={agg['wheat_units']:.0f} "
               f"feeds_per_pickup={fpp:.2f}\n"
+              f"    MOV dist={agg['distance_traveled']:.0f} shed_visits={agg['shed_visits']:.0f} "
+              f"(drops={agg['drops']:.0f}) dist/visit={agg['distance_traveled']/mv_vis:.1f} "
+              f"stand_ignored={agg['stand_ignored']:.0f} work_feet={agg['work_under_feet']:.0f}\n"
+              f"    ignored_type: {ign_str or '-'}\n"
+              f"    done_vs_ignored: {ratio_str or '-'}\n"
               f"    sells_med: {sell_str}\n"
               f"    shed_end_med: {shed_str}")
 
