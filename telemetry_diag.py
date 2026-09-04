@@ -18,6 +18,21 @@ PROD = {"PLANT", "WATER", "HARVEST", "FEED", "CARE", "FERTILIZE",
         "COLLECT_FERTILIZER", "PLACE", "BUILD_PASTURE", "DIG", "DROP", "PICKUP", "BUY_ANIMAL"}
 CAP = 6  # max_held animal (engine)
 
+# Parametros animais do engine (first_yield_day, interval, max_held).
+ANIM = {
+    "GOOSE": {"first": 4, "interval": 1, "cap": 4},
+    "COW":   {"first": 8, "interval": 2, "cap": 6},
+    "SHEEP": {"first": 6, "interval": 3, "cap": 6},
+}
+
+
+def _fib(n):
+    """fib indexado como no engine: _fib(0)=1, _fib(1)=1, _fib(2)=2, _fib(3)=3..."""
+    a, b = 1, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
 
 def load(name: str):
     folder = name if name.startswith("hybrid_") else "hybrid_" + name
@@ -65,6 +80,29 @@ class Tele:
         self.buys = Counter()
         self.final = None
 
+        # --- instrumentacao hires (HIRE order != hand pago) ---
+        self.hire_orders = 0        # ordens ["HIRE"] emitidas no market do act
+        self.successful_hires = 0   # incremento REAL de len(farm.hands) intra-dia
+        self.hire_cost = 0          # custo fibonacci reconstruido (mult=1)
+        self.prev_n_hands = 0
+        self.hired_hand_turns = 0   # soma de hands presentes por turno (sem farmer)
+
+        # --- instrumentacao CARE realizacao / clipping por transicao de dia ---
+        self._last_day = None
+        self._last_pastures = {}
+        self.prod_nights = 0         # noites em que algum animal produziu
+        self.prod_nights_fed = 0     # noites produtivas em que o animal estava fed
+        self.base_units = 0          # unidades base (sem bonus) que entraram
+        self.care_consumed = 0       # pending usado em noite produtiva COM feed
+        self.care_realized = 0       # do pending, qto virou yield (nao clipado)
+        self.care_clipped = 0        # do pending, qto foi perdido por max_held
+        self.care_lost_no_feed = 0   # pending ZERADO por produzir sem feed (l.815 engine)
+        self.prod_clipped_total = 0  # unidades totais clipadas por max_held (base+bonus)
+
+        # --- logistica WHEAT ---
+        self.wheat_pickups = 0       # comandos PICKUP WHEAT
+        self.wheat_units = 0         # unidades pedidas em PICKUP WHEAT n
+
     def _is_pasture(self, cell):
         return isinstance(cell, dict) and cell.get("kind") == "PASTURE" and cell.get("animal")
 
@@ -80,12 +118,91 @@ class Tele:
                     if y >= CAP:
                         self.near_cap_turns += 1
 
+    def _snapshot_pastures(self, farm):
+        """Estado dos pastos com animal no obs atual (pre-acao)."""
+        snap = {}
+        tiles = farm.get("tiles") or []
+        for yy, row in enumerate(tiles):
+            for xx, cell in enumerate(row):
+                if isinstance(cell, dict) and cell.get("animal"):
+                    snap[(xx, yy)] = {
+                        "animal": cell["animal"],
+                        "placed": int(cell.get("placed_day", 0) or 0),
+                        "yield": int(cell.get("yield_units", 0) or 0),
+                        "pend": int(cell.get("pending_care_bonus", 0) or 0),
+                        "fed": bool(cell.get("fed_today")),
+                        "cared": bool(cell.get("cared_today")),
+                    }
+        return snap
+
+    def _transit_pastures(self, prev_snap, farm, new_day):
+        """Analisa a producao da virada de dia (engine _daily_refresh_animals).
+
+        prev_snap: estado do ULTIMO turno do dia anterior (flags do dia que
+        terminou). farm/obs atual: ja pos-producao (primeiro turno do novo dia).
+        So mede quando a producao acontece (dia produtivo do animal).
+        """
+        tiles = farm.get("tiles") or []
+        for (xx, yy), p in prev_snap.items():
+            cell = None
+            if 0 <= yy < len(tiles):
+                row = tiles[yy]
+                if 0 <= xx < len(row) and isinstance(row[xx], dict) and row[xx].get("animal"):
+                    cell = row[xx]
+            if cell is None:
+                continue  # animal fugiu / tile mudou
+            a = ANIM.get(p["animal"])
+            if not a:
+                continue
+            dias = new_day - p["placed"] - a["first"]
+            if dias < 0 or dias % a["interval"] != 0:
+                continue  # noite nao produtiva para este animal
+            cap = a["cap"]
+            self.prod_nights += 1
+            base = 1
+            y_exp = p["yield"] + base
+            if p["fed"]:
+                self.prod_nights_fed += 1
+                bonus = p["pend"]
+                y_exp += bonus
+                if bonus > 0:
+                    self.care_consumed += bonus
+                    entered = max(0, min(cap, y_exp) - (p["yield"] + base))
+                    self.care_realized += entered
+                    self.care_clipped += max(0, bonus - entered)
+            else:
+                # produziu sem feed: pending e zerado no engine (linha 815)
+                self.care_lost_no_feed += p["pend"]
+            self.prod_clipped_total += max(0, y_exp - cap)
+            self.base_units += max(0, min(cap, p["yield"] + base) - p["yield"])
+
     def record(self, obs, act):
         self.turns += 1
         farm = obs["farms"][obs["player"]]
         n_hands = len(farm.get("hands") or [])
         self.hand_turns += 1 + n_hands
         self._note_cells(farm)
+
+        # --- hires: ordem != hand pago (engine zera hands/hires_today no fim do dia) ---
+        day = int(obs.get("day", 0) or 0)
+        if self._last_day is None:
+            # primeiro turno do jogo (hands comecam zerados no dia 0)
+            self.prev_n_hands = n_hands
+        elif day > self._last_day:
+            # virada de dia: mede a producao animal da noite que passou
+            self._transit_pastures(self._last_pastures, farm, day)
+            # hands foram resetados para [] no end_of_day
+            self.prev_n_hands = n_hands
+        else:
+            if n_hands > self.prev_n_hands:
+                diff = n_hands - self.prev_n_hands
+                self.successful_hires += diff
+                for k in range(self.prev_n_hands, n_hands):
+                    self.hire_cost += _fib(k)
+            self.prev_n_hands = n_hands
+        self.hired_hand_turns += n_hands
+        self._last_pastures = self._snapshot_pastures(farm)
+        self._last_day = day
 
         # shed
         shed = obs.get("private", {}).get("shed", {})
@@ -101,6 +218,8 @@ class Tele:
                 continue
             t = o[0]
             self.market_orders[t] += 1
+            if t == "HIRE":
+                self.hire_orders += 1
             if t == "SELL" and len(o) >= 3:
                 self.sells[o[1]] += o[2]
             elif t in ("BUY_PRODUCT", "BUY_ANIMAL", "BUY_SEED") and len(o) >= 3:
@@ -145,6 +264,13 @@ class Tele:
         self.prod += 1
         if cmd == "PICKUP":
             self.pickup[action[1] if len(action) > 1 else "?"] += 1
+            item = action[1] if len(action) > 1 else None
+            if item == "WHEAT":
+                self.wheat_pickups += 1
+                try:
+                    self.wheat_units += int(action[2]) if len(action) > 2 else 1
+                except (TypeError, ValueError):
+                    self.wheat_units += 1
         # estado da celula onde a acao age (posicao atual do worker)
         # pos e preenchida fora via _cell_state
 
@@ -204,6 +330,22 @@ class Tele:
             "shed_end": dict(self.shed),
             "sells": dict(self.sells),
             "market_orders": dict(self.market_orders),
+            "hire_orders": self.hire_orders,
+            "successful_hires": self.successful_hires,
+            "hire_cost": self.hire_cost,
+            "hired_hand_turns": self.hired_hand_turns,
+            "prod_nights": self.prod_nights,
+            "prod_nights_fed": self.prod_nights_fed,
+            "base_units": self.base_units,
+            "care_consumed": self.care_consumed,
+            "care_realized": self.care_realized,
+            "care_clipped": self.care_clipped,
+            "care_lost_no_feed": self.care_lost_no_feed,
+            "prod_clipped_total": self.prod_clipped_total,
+            "wheat_pickups": self.wheat_pickups,
+            "wheat_units": self.wheat_units,
+            "feeds_per_pickup": round(self.feeds / max(1, self.wheat_pickups), 2),
+            "care_realization": round(self.care_realized / max(1, self.care), 3),
         }
 
 
@@ -267,9 +409,12 @@ def main():
             agg["reward"] += (r0 or 0)
             for k in ("hand_turns", "actions", "moves", "PASS", "no_action", "prod",
                       "care", "care_at_cap", "care_pending>1", "feeds",
-                      "animal_days", "near_cap_turns"):
+                      "animal_days", "near_cap_turns", "hire_orders", "successful_hires",
+                      "hire_cost", "hired_hand_turns", "prod_nights", "prod_nights_fed",
+                      "base_units", "care_consumed", "care_realized", "care_clipped",
+                      "care_lost_no_feed", "prod_clipped_total", "wheat_pickups", "wheat_units"):
                 agg[k] += s[k]
-            for k in ("moves/prod", "pass_share_actions"):
+            for k in ("moves/prod", "pass_share_actions", "feeds_per_pickup", "care_realization"):
                 agg[k] = None  # recomputa depois
             for k in ("sells", "shed_end"):
                 for item, v in s[k].items():
@@ -277,12 +422,15 @@ def main():
             print(f"  [{cand} seed {seed}] reward={r0} "
                   f"moves/prod={s['moves/prod']} pass_share={s['pass_share_actions']} "
                   f"h2p={s['harvest_to_plant']} care={s['care']}(cap{s['care_at_cap']}) "
-                  f"feeds={s['feeds']} pickup={s['pickup']} sells={s['sells']}")
+                  f"feeds={s['feeds']} pickup={s['pickup']} sells={s['sells']} "
+                  f"hires={s['successful_hires']}/{s['hire_orders']} cost={s['hire_cost']}")
         n = len(seeds)
         sell_keys = [k for k in agg if k.startswith("sells:")]
         sell_str = " ".join(f"{k[6:]}={agg[k]/n:.0f}" for k in sell_keys if agg[k] > 0)
         shed_keys = [k for k in agg if k.startswith("shed_end:")]
         shed_str = " ".join(f"{k[9:]}={agg[k]/n:.0f}" for k in shed_keys if agg[k] > 0)
+        care_r = agg["care_realized"] / max(1, agg["care"])
+        fpp = agg["feeds"] / max(1, agg["wheat_pickups"])
         print(f"== {cand}: mean_reward={agg['reward']/n:.0f} | "
               f"hand_turns={agg['hand_turns']:.0f} prod={agg['prod']:.0f} "
               f"moves={agg['moves']:.0f} PASS={agg['PASS']:.0f} noact={agg['no_action']:.0f} "
@@ -290,6 +438,15 @@ def main():
               f"pass_share={agg['PASS']/max(1,agg['actions']):.3f} "
               f"care={agg['care']:.0f}(cap {agg['care_at_cap']:.0f}) feeds={agg['feeds']:.0f} "
               f"animal_days={agg['animal_days']:.0f} near_cap={agg['near_cap_turns']:.0f}\n"
+              f"    HIRE orders={agg['hire_orders']:.0f} success={agg['successful_hires']:.0f} "
+              f"cost={agg['hire_cost']:.0f} hired_hand_turns={agg['hired_hand_turns']:.0f}\n"
+              f"    CARE issued={agg['care']:.0f} consumed={agg['care_consumed']:.0f} "
+              f"realized={agg['care_realized']:.0f} clipped={agg['care_clipped']:.0f} "
+              f"lost_nofeed={agg['care_lost_no_feed']:.0f} | realization={care_r:.2f}\n"
+              f"    PROD nights={agg['prod_nights']:.0f} fed={agg['prod_nights_fed']:.0f} "
+              f"base_units={agg['base_units']:.0f} clip_total={agg['prod_clipped_total']:.0f}\n"
+              f"    WHEAT pickups={agg['wheat_pickups']:.0f} units={agg['wheat_units']:.0f} "
+              f"feeds_per_pickup={fpp:.2f}\n"
               f"    sells_med: {sell_str}\n"
               f"    shed_end_med: {shed_str}")
 
