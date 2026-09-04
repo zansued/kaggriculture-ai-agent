@@ -18,11 +18,11 @@ PROD = {"PLANT", "WATER", "HARVEST", "FEED", "CARE", "FERTILIZE",
         "COLLECT_FERTILIZER", "PLACE", "BUILD_PASTURE", "DIG", "DROP", "PICKUP", "BUY_ANIMAL"}
 CAP = 6  # max_held animal (engine)
 
-# Parametros animais do engine (first_yield_day, interval, max_held).
+# Parametros animais do engine (first_yield_day, interval, max_held, custo fixo).
 ANIM = {
-    "GOOSE": {"first": 4, "interval": 1, "cap": 4},
-    "COW":   {"first": 8, "interval": 2, "cap": 6},
-    "SHEEP": {"first": 6, "interval": 3, "cap": 6},
+    "GOOSE": {"first": 4, "interval": 1, "cap": 4, "cost": 300},
+    "COW":   {"first": 8, "interval": 2, "cap": 6, "cost": 400},
+    "SHEEP": {"first": 6, "interval": 3, "cap": 6, "cost": 500},
 }
 
 
@@ -103,6 +103,9 @@ class Tele:
         self.wheat_pickups = 0       # comandos PICKUP WHEAT
         self.wheat_units = 0         # unidades pedidas em PICKUP WHEAT n
 
+        # --- slack de expansao diario ---
+        self.daily = {}              # day -> registro (caixa, rebanho, precos, hires, buys)
+
     def _is_pasture(self, cell):
         return isinstance(cell, dict) and cell.get("kind") == "PASTURE" and cell.get("animal")
 
@@ -176,6 +179,71 @@ class Tele:
             self.prod_clipped_total += max(0, y_exp - cap)
             self.base_units += max(0, min(cap, p["yield"] + base) - p["yield"])
 
+    def _note_daily(self, obs, farm, day):
+        """Registra caixa/rebanho/precos/hires do dia (slack de expansao)."""
+        d = self.daily.setdefault(day, {
+            "money_open": None, "money_close": None,
+            "cows": 0, "sheep": 0, "goose": 0,
+            "pastures_total": 0, "pastures_empty": 0,
+            "cow_price_open": None, "cow_price": None,
+            "sheep_price_open": None, "sheep_price": None,
+            "goose_price_open": None, "goose_price": None,
+            "hires_day": 0, "hire_cost_day": 0,
+            "cow_buys": 0, "sheep_buys": 0, "goose_buys": 0,
+        })
+        money = int(farm.get("money", 0) or 0)
+        if d["money_open"] is None:
+            d["money_open"] = money
+        d["money_close"] = money
+        cows = sheep = goose = ptotal = pempty = 0
+        for row in farm.get("tiles") or []:
+            for cell in row:
+                if not isinstance(cell, dict):
+                    continue
+                a = cell.get("animal")
+                if a:
+                    # tile ocupado por animal (kind = PASTURE/COOP + key "animal")
+                    if a == "COW":
+                        cows += 1
+                    elif a == "SHEEP":
+                        sheep += 1
+                    elif a == "GOOSE":
+                        goose += 1
+                elif cell.get("kind") in ("PASTURE", "COOP"):
+                    pempty += 1
+        ptotal = cows + sheep + goose + pempty
+        d["cows"] = cows
+        d["sheep"] = sheep
+        d["goose"] = goose
+        d["pastures_total"] = ptotal
+        d["pastures_empty"] = pempty
+        # precos de animal sao FIXOS no engine (ANIMALS[item]["cost"]); nao vem do market
+        for item, key in (("COW", "cow_price"), ("SHEEP", "sheep_price"), ("GOOSE", "goose_price")):
+            cost = ANIM[item]["cost"]
+            if d[key + "_open"] is None:
+                d[key + "_open"] = cost
+            d[key] = cost
+        return d
+
+    def daily_report(self):
+        """Linhas dia a dia: caixa de abertura, rebanho, preco COW, quantos COW
+        'cabiam' no caixa (money_open // cow_price), compras e hires do dia."""
+        rows = []
+        for day in sorted(self.daily):
+            d = self.daily[day]
+            mopen = d["money_open"] if d["money_open"] is not None else 0
+            cprice = d["cow_price_open"] or d["cow_price"] or 0
+            afford = int(mopen // cprice) if cprice > 0 else 0
+            rows.append({
+                "day": day, "money_open": mopen, "money_close": d["money_close"],
+                "cows": d["cows"], "sheep": d["sheep"], "goose": d["goose"],
+                "pastures_total": d["pastures_total"], "pastures_empty": d["pastures_empty"],
+                "cow_price": cprice, "afford_cow": afford,
+                "cow_buys": d["cow_buys"],
+                "hires_day": d["hires_day"], "hire_cost_day": d["hire_cost_day"],
+            })
+        return rows
+
     def record(self, obs, act):
         self.turns += 1
         farm = obs["farms"][obs["player"]]
@@ -185,6 +253,7 @@ class Tele:
 
         # --- hires: ordem != hand pago (engine zera hands/hires_today no fim do dia) ---
         day = int(obs.get("day", 0) or 0)
+        self._note_daily(obs, farm, day)
         if self._last_day is None:
             # primeiro turno do jogo (hands comecam zerados no dia 0)
             self.prev_n_hands = n_hands
@@ -198,7 +267,9 @@ class Tele:
                 diff = n_hands - self.prev_n_hands
                 self.successful_hires += diff
                 for k in range(self.prev_n_hands, n_hands):
-                    self.hire_cost += _fib(k)
+                    c = _fib(k)
+                    self.hire_cost += c
+                    self.daily[day]["hire_cost_day"] += c
             self.prev_n_hands = n_hands
         self.hired_hand_turns += n_hands
         self._last_pastures = self._snapshot_pastures(farm)
@@ -220,10 +291,19 @@ class Tele:
             self.market_orders[t] += 1
             if t == "HIRE":
                 self.hire_orders += 1
+                self.daily[day]["hires_day"] += 1
             if t == "SELL" and len(o) >= 3:
                 self.sells[o[1]] += o[2]
             elif t in ("BUY_PRODUCT", "BUY_ANIMAL", "BUY_SEED") and len(o) >= 3:
                 self.buys[o[1]] += o[2]
+                if t == "BUY_ANIMAL":
+                    dd = self.daily[day]
+                    if o[1] == "COW":
+                        dd["cow_buys"] += o[2]
+                    elif o[1] == "SHEEP":
+                        dd["sheep_buys"] += o[2]
+                    elif o[1] == "GOOSE":
+                        dd["goose_buys"] += o[2]
 
         # farmer action
         fa = act.get("farmer") if isinstance(act, dict) else None
@@ -391,6 +471,8 @@ def main():
     ap.add_argument("--opp", default="v18")
     ap.add_argument("--seeds", default="1-3")
     ap.add_argument("--steps", type=int, default=720)
+    ap.add_argument("--daily", action="store_true",
+                    help="imprime tabela dia a dia do slack de expansao")
     args = ap.parse_args()
 
     opp = load(args.opp)
@@ -424,6 +506,12 @@ def main():
                   f"h2p={s['harvest_to_plant']} care={s['care']}(cap{s['care_at_cap']}) "
                   f"feeds={s['feeds']} pickup={s['pickup']} sells={s['sells']} "
                   f"hires={s['successful_hires']}/{s['hire_orders']} cost={s['hire_cost']}")
+            if args.daily:
+                print("    -- slack diario: d | money_open | cows sheep goose | past(empty) | cow_price | afford | cow_buys | hires(cost)")  # noqa: E501
+                for r in tele.daily_report():
+                    print(f"    d{r['day']:>2} | {r['money_open']:>7} | {r['cows']} {r['sheep']} {r['goose']} "
+                          f"| {r['pastures_total']}({r['pastures_empty']}) | {r['cow_price']:>4} "
+                          f"| {r['afford_cow']:>2} | {r['cow_buys']} | {r['hires_day']}({r['hire_cost_day']})")
         n = len(seeds)
         sell_keys = [k for k in agg if k.startswith("sells:")]
         sell_str = " ".join(f"{k[6:]}={agg[k]/n:.0f}" for k in sell_keys if agg[k] > 0)
