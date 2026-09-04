@@ -16,6 +16,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from src.clock_utils import clock_safe  # noqa: E402
+
 
 def _modname(path: str) -> str:
     base = os.path.basename(path).replace(".py", "")
@@ -38,7 +41,7 @@ def load(path: str):
     spec = importlib.util.spec_from_file_location(_modname(path), path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return _wrap(mod.agent)
+    return clock_safe(_wrap(mod.agent))
 
 
 def main():

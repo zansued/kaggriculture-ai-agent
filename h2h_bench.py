@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.join(_HERE, "reference", "opponents"))
 import purearch_opponent  # noqa: E402
 from kaggle_environments import make  # noqa: E402
 
+from src.clock_utils import clock_safe  # noqa: E402
+
 
 def load_agent(name: str):
     """Return an agent function. name is one of:
@@ -65,11 +67,11 @@ def main():
     ap.add_argument("--json", default=None)
     args = ap.parse_args()
 
-    agent_a = load_agent(args.agent_a)
+    agent_a = clock_safe(load_agent(args.agent_a))
     if args.agent_b in ("starter", "random"):
         agent_b = args.agent_b
     else:
-        agent_b = load_agent(args.agent_b)
+        agent_b = clock_safe(load_agent(args.agent_b))
     seeds = parse_seeds(args.seeds)
 
     print(f"=== H2H {args.agent_a} (P0) vs {args.agent_b} (P1), seeds={seeds} ===", flush=True)
