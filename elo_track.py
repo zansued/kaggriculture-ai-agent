@@ -57,10 +57,10 @@ def main():
     print(f"TRACK ts={now} sub_date={cur['sub_date']} elo={cur['elo']}")
     delta_base = None
     if baseline:
-        delta_base = round(cur["elo"] - float(baseline["elo"]), 1)
+        delta_base = round(float(cur["elo"]) - float(baseline["elo"]), 1)
         print(f"BASELINE elo={baseline['elo']} (sub {baseline['sub_date']}) delta={delta_base:+.1f}")
     if prev:
-        d_prev = round(cur["elo"] - float(prev["elo"]), 1)
+        d_prev = round(float(cur["elo"]) - float(prev["elo"]), 1)
         print(f"PREV elo={prev['elo']} delta={d_prev:+.1f}")
     if baseline and baseline["sub_date"] != cur["sub_date"]:
         print("NEW_SUBMISSION")
