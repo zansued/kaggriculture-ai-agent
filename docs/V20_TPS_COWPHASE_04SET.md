@@ -58,6 +58,29 @@ Tape-Preserving Transaction Splicer (crop) + Phase-Locked Cow Service.
    próximo overlay — sem regressão vs v19.
 3. Resultado negativo documentado: evita repetir a tentativa micro-splice.
 
-Próximo passo recomendado: medir cadência real de FEED por COW por seed (probe já
-coleta) e implementar **skip de FEED fora de fase** (off-parity) com safety
-(consecutive_unfed < 2), testando primeiro em mecanístico.
+## v20_feedskip (04/09) — REFUTADO
+
+Teste da alavanca P3 (reduzir FEED diário redundante). `probe_cow_feed.py`
+mediu no champion: feed ~0.98 vaca-dia; ~49% dos feeds em diff par (fora de
+fase); runs diários triplos ~1014; prod_eve sempre fed; `max_unfed=1`, 0 fugas.
+
+`build_hybrid_v20_feedskip.py` = champion v19 + CLOCK-0 + overlay que **pula o
+FEED em diff PAR quando a vaca foi alimentada ontem** (nunca pula 2 seguidos →
+`max_unfed<=1`, sem fuga; prod-eves = diff ímpar → sempre alimentadas).
+
+Resultado h2h seeds 1-8 (P0): **2-6, mean d −6.8k** (pior). A sonda confirma que
+o skip foi mecanicamente limpo (feeds 552→30, 0 fugas, prod_eve fed 426/426),
+mas o reward despencou.
+
+**Causa mecânica (durável):** o CARE só banqueia +1 `pending_care_bonus` no EOD
+se a vaca estiver **fed AND cared**. Alimentando+cuidando TODOS os dias, o Moon
+acumula pending rápido e cada noite produtiva rende ~base+2 (3 MILK/tick). Com
+feed só em dias ímpares, o CARE dos dias pares não banqueia → ~2 MILK/tick. O
+"feed diário redundante" é **load-bearing** para o bônus de leite: o custo do
+WHEAT extra (~$10) é amplamente compensado pelo MILK extra (~$160 base). A
+suposição do PESQUISA_DEEP3 de que dava para alimentar a cada 2 dias sem perder
+produção **ignorava o efeito do CARE banking diário**.
+
+Lição: não tentar economizar FEED de COW no Moon; a cadência diária já é ótima
+para maximizar leite. A alavanca animal restante seria aumentar Nº de COWs
+(custo de capital/estrutura) — não reduzir custo operacional de feed.
