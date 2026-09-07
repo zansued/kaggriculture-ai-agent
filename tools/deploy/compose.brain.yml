@@ -1,0 +1,67 @@
+# Kaggriculture Brain — Docker Compose V1 (RESERVA)
+# Estado: PREPARADO, NAO IMPLANTADO. Subir apenas quando houver worker concorrente/
+# multi-modelo (fase V1.1). Recomendacao atual: rodar o brain como CLI/Python no repo.
+#
+# Rede isolada kaggle-brain-net; nenhuma porta exposta publicamente (loopback).
+# Nao toca em supabase-* nem nos containers de outras stacks.
+#
+# Uso futuro:
+#   docker network create kaggle-brain-net
+#   docker network connect kaggle-brain-net kaggle-meta-db   # para brain->postgres:5432
+#   docker compose -f tools/deploy/compose.brain.yml up -d
+
+name: kaggle-brain
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: kaggle-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"   # REST
+      - "127.0.0.1:6334:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks: [kaggle-brain-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: kaggle-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks: [kaggle-brain-net]
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: kaggle-litellm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
+    networks: [kaggle-brain-net]
+
+  # brain: (quando houver codigo em ./brain) build + executa research_graph
+  # brain:
+  #   build: ./brain
+  #   container_name: kaggle-brain
+  #   restart: unless-stopped
+  #   env_file: ./brain/.env
+  #   networks: [kaggle-brain-net]
+  #   depends_on: [qdrant, redis, litellm]
+
+networks:
+  kaggle-brain-net:
+    name: kaggle-brain-net
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+    name: kaggle-qdrant-storage
+  redis_data:
+    name: kaggle-redis-data
