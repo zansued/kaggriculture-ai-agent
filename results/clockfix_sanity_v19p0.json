@@ -1,0 +1,23 @@
+{
+ "a": "submissions/hybrid_v19/main.py",
+ "b": "submissions/hybrid_v18/main.py",
+ "games": [
+  {
+   "seed": 1,
+   "r0": 106607.0,
+   "r1": 106088.0,
+   "st0": "DONE",
+   "st1": "DONE"
+  },
+  {
+   "seed": 2,
+   "r0": 97323.0,
+   "r1": 97016.0,
+   "st0": "DONE",
+   "st1": "DONE"
+  }
+ ],
+ "wins_a": 2,
+ "wins_b": 0,
+ "ties": 0
+}
