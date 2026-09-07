@@ -34,6 +34,7 @@ def main():
         if cur.fetchone():
             skipped += 1
             continue
+        agent_b = r.get('agent_b') or '(sem_baseline)'
         ties = r.get('ties')
         if ties is None and 'wins_a' in r:
             ties = 0
@@ -45,7 +46,7 @@ def main():
             INSERT INTO experiments (agent_a, agent_b, seeds, wins_a, wins_b, ties,
                                      mean_d, git_sha, axis, verdict, notes)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (r.get('agent_a'), r.get('agent_b'), r.get('seeds'), r.get('wins_a'),
+        """, (r.get('agent_a'), agent_b, r.get('seeds'), r.get('wins_a'),
               r.get('wins_b'), ties, r.get('mean_d'), r.get('commit'), r.get('axis'),
               r.get('verdict'), notes))
         inserted += 1
