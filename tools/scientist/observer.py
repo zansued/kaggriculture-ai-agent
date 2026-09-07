@@ -44,8 +44,8 @@ def main():
             SELECT rank, team_id, team_name, score, submission_id FROM leaderboard_snapshots
             WHERE captured_at = %s ORDER BY rank LIMIT %s
         """, (t, args.window))
-        return {r[1]: {'rank': r[0], 'name': r[2], 'score': float(r[3]) if r[3] else None,
-                       'sub': r[4]} for r in cur.fetchall()}
+        return {r[1]: {'team_id': r[1], 'rank': r[0], 'name': r[2],
+                       'score': float(r[3]) if r[3] else None, 'sub': r[4]} for r in cur.fetchall()}
 
     latest = load(t_latest)
     prev = load(t_prev)
