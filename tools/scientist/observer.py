@@ -88,7 +88,7 @@ def main():
         'n_snapshots_pairs': 1,
     }
     cur.execute("INSERT INTO agent_runs (run_type, status, payload) VALUES ('observer','done',%s)",
-                (json.dumps(payload, ensure_ascii=False)))
+                (json.dumps(payload, ensure_ascii=False),))
     conn.commit()
     cur.close(); conn.close()
     print('\nagent_runs: observer gravado.')
