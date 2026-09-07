@@ -78,3 +78,6 @@ Pipfile.lock
 .env.production.local
 # Sweep logs
 sweep_combos*.log
+
+# dados de coleta (replays sao grandes; snapshots vao p/ Postgres)
+data/
