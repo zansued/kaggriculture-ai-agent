@@ -91,4 +91,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()  # não usar sys.exit(main()): main retorna lista -> exit code 1
