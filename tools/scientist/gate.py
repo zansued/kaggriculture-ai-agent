@@ -16,23 +16,9 @@ Uso:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 
-
-def stats(paths):
-    wa = wb = ties = 0
-    weighted = 0.0
-    n = 0
-    for p in paths:
-        d = json.load(open(p, encoding='utf-8'))
-        wa += d['wins_a']
-        wb += d['wins_b']
-        ties += d['ties']
-        weighted += d['mean_d'] * d['n']
-        n += d['n']
-    mean_d = round(weighted / n, 1) if n else 0.0
-    return wa, wb, ties, mean_d, n, len(paths)
+from h2h import combine_stats
 
 
 def main():
@@ -44,7 +30,7 @@ def main():
     ap.add_argument('--min-n', type=int, default=32)
     args = ap.parse_args()
 
-    wa, wb, ties, mean_d, n, n_files = stats(args.jsons)
+    wa, wb, ties, mean_d, n, n_files = combine_stats(args.jsons)
     total = wa + wb
     win_rate = wa / total if total else None
     is_reval = args.candidate == args.champion

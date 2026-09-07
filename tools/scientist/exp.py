@@ -17,21 +17,7 @@ import json
 import sys
 
 from db import current_git_sha, get_conn
-
-
-def stats_from_jsons(paths):
-    wa = wb = ties = 0
-    weighted = 0.0
-    n = 0
-    for p in paths:
-        d = json.load(open(p, encoding='utf-8'))
-        wa += d['wins_a']
-        wb += d['wins_b']
-        ties += d['ties']
-        weighted += d['mean_d'] * d['n']
-        n += d['n']
-    mean_d = round(weighted / n, 1) if n else 0.0
-    return wa, wb, ties, mean_d, n
+from h2h import combine_stats
 
 
 def main():
@@ -51,7 +37,7 @@ def main():
     args = ap.parse_args()
 
     if args.json:
-        wa, wb, ties, mean_d, n = stats_from_jsons(args.json)
+        wa, wb, ties, mean_d, n, nfiles = combine_stats(args.json)
         wins_a, wins_b = wa, wb
     else:
         if None in (args.wins_a, args.wins_b, args.ties, args.mean_d):
